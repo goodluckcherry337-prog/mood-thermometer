@@ -11,24 +11,182 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDKs with Account-auth Hybrid Loader -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        let firebaseConfig = null;
+        try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) {
+            console.warn("Could not load cloud configurations. Switching to local account simulator.", e);
+        }
+
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'mommy-mood-tracker';
 
-        // 將 Firebase 服務存入全域供 React 呼叫，確保有完美的記憶功能
-        window.FirebaseServices = { 
-            auth, db, appId, signInAnonymously, onAuthStateChanged, signInWithCustomToken, 
-            collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query 
-        };
-        window.dispatchEvent(new Event('firebase-ready'));
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+
+            window.FirebaseServices = { 
+                auth, db, appId, signInAnonymously, onAuthStateChanged, signInWithCustomToken, 
+                createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+                collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query,
+                isMock: false
+            };
+            window.dispatchEvent(new Event('firebase-ready'));
+        } else {
+            console.log("Running simulated cloud engine on GitHub / Local...");
+            setupLocalServices();
+        }
+
+        // 本地模擬帳號與儲存服務 (供 GitHub Pages 完美運行測試)
+        function setupLocalServices() {
+            window.localListeners = window.localListeners || {};
+            window.authCallbacks = window.authCallbacks || [];
+            
+            // 讀取目前的模擬登入 Session
+            let currentSession = JSON.parse(localStorage.getItem('local_current_user') || 'null');
+            
+            window.triggerLocalAuthState = (u) => {
+                currentSession = u;
+                window.authCallbacks.forEach(cb => cb(u));
+            };
+
+            const mockCollection = (db, ...paths) => ({ path: paths.join('/') });
+            const mockDoc = (db, ...paths) => ({ path: paths.join('/') });
+
+            window.FirebaseServices = {
+                auth: { get currentUser() { return currentSession; } },
+                db: 'local-db',
+                appId: appId,
+                isMock: true,
+                signInAnonymously: async () => {
+                    const guest = { uid: 'guest-mom-user', isAnonymous: true };
+                    localStorage.setItem('local_current_user', JSON.stringify(guest));
+                    window.triggerLocalAuthState(guest);
+                    return { user: guest };
+                },
+                signInWithCustomToken: async () => {
+                    const guest = { uid: 'guest-mom-user', isAnonymous: true };
+                    return { user: guest };
+                },
+                createUserWithEmailAndPassword: async (auth, email, password) => {
+                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
+                    if (users.find(u => u.email === email)) {
+                        throw { code: 'auth/email-already-in-use', message: '此 Email 已經被註冊囉！' };
+                    }
+                    const newUser = { uid: 'local_u_' + Date.now(), email: email, isAnonymous: false };
+                    users.push({ ...newUser, password });
+                    localStorage.setItem('local_mock_users', JSON.stringify(users));
+                    localStorage.setItem('local_current_user', JSON.stringify(newUser));
+                    window.triggerLocalAuthState(newUser);
+                    return { user: newUser };
+                },
+                signInWithEmailAndPassword: async (auth, email, password) => {
+                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
+                    const found = users.find(u => u.email === email && u.password === password);
+                    if (!found) {
+                        throw { code: 'auth/wrong-password', message: '帳號或密碼輸入錯誤，請再試一次。' };
+                    }
+                    const currUser = { uid: found.uid, email: found.email, isAnonymous: false };
+                    localStorage.setItem('local_current_user', JSON.stringify(currUser));
+                    window.triggerLocalAuthState(currUser);
+                    return { user: currUser };
+                },
+                signOut: async () => {
+                    localStorage.removeItem('local_current_user');
+                    window.triggerLocalAuthState(null);
+                },
+                onAuthStateChanged: (auth, callback) => {
+                    window.authCallbacks.push(callback);
+                    // 延遲發送當前狀態，確保 React 準備好
+                    setTimeout(() => callback(currentSession), 100);
+                    return () => {
+                        window.authCallbacks = window.authCallbacks.filter(cb => cb !== callback);
+                    };
+                },
+                collection: mockCollection,
+                doc: mockDoc,
+                addDoc: async (collRef, data) => {
+                    const path = collRef.path;
+                    const list = JSON.parse(localStorage.getItem(path) || '[]');
+                    const newDoc = { id: 'doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), ...data };
+                    list.push(newDoc);
+                    localStorage.setItem(path, JSON.stringify(list));
+                    if (window.localListeners[path]) {
+                        window.localListeners[path].forEach(cb => cb(list));
+                    }
+                    return newDoc;
+                },
+                onSnapshot: (query, callback) => {
+                    const path = query.path;
+                    if (!window.localListeners[path]) window.localListeners[path] = [];
+                    const listener = (list) => {
+                        callback({
+                            docs: list.map(item => ({
+                                id: item.id,
+                                data: () => item
+                            }))
+                        });
+                    };
+                    window.localListeners[path].push(listener);
+                    const currentList = JSON.parse(localStorage.getItem(path) || '[]');
+                    setTimeout(() => listener(currentList), 50);
+                    return () => {
+                        window.localListeners[path] = window.localListeners[path].filter(cb => cb !== listener);
+                    };
+                },
+                setDoc: async (docRef, data) => {
+                    const path = docRef.path;
+                    localStorage.setItem(path, JSON.stringify(data));
+                    return {};
+                },
+                getDoc: async (docRef) => {
+                    const path = docRef.path;
+                    const item = localStorage.getItem(path);
+                    return {
+                        exists: () => item !== null,
+                        data: () => JSON.parse(item)
+                    };
+                },
+                deleteDoc: async (docRef) => {
+                    const rawPath = docRef.path;
+                    const parts = rawPath.split('/');
+                    const idToDelete = parts.pop();
+                    const parentPath = parts.join('/');
+                    
+                    let list = JSON.parse(localStorage.getItem(parentPath) || '[]');
+                    list = list.filter(item => item.id !== idToDelete);
+                    localStorage.setItem(parentPath, JSON.stringify(list));
+                    if (window.localListeners[parentPath]) {
+                        window.localListeners[parentPath].forEach(cb => cb(list));
+                    }
+                    return {};
+                },
+                updateDoc: async (docRef, updatedFields) => {
+                    const rawPath = docRef.path;
+                    const parts = rawPath.split('/');
+                    const idToUpdate = parts.pop();
+                    const parentPath = parts.join('/');
+                    
+                    let list = JSON.parse(localStorage.getItem(parentPath) || '[]');
+                    list = list.map(item => item.id === idToUpdate ? { ...item, ...updatedFields } : item);
+                    localStorage.setItem(parentPath, JSON.stringify(list));
+                    if (window.localListeners[parentPath]) {
+                        window.localListeners[parentPath].forEach(cb => cb(list));
+                    }
+                    return {};
+                },
+                query: (q) => q
+            };
+            window.dispatchEvent(new Event('firebase-ready'));
+        }
     </script>
 
     <style>
@@ -134,6 +292,31 @@
                         <circle cx="12" cy="12" r="10" />
                         <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
                     </React.Fragment>
+                ),
+                user: (
+                    <React.Fragment>
+                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                    </React.Fragment>
+                ),
+                lock: (
+                    <React.Fragment>
+                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </React.Fragment>
+                ),
+                mail: (
+                    <React.Fragment>
+                        <rect width="20" height="16" x="2" y="4" rx="2" />
+                        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                    </React.Fragment>
+                ),
+                alert: (
+                    <React.Fragment>
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </React.Fragment>
                 )
             };
             return (
@@ -165,7 +348,7 @@
         const App = () => {
             const [isInit, setIsInit] = useState(false);
             const [user, setUser] = useState(null);
-            const [view, setView] = useState('home');
+            const [view, setView] = useState('welcome'); // 預設進到 welcome 入口頁面
             const [moodScore, setMoodScore] = useState(50);
             const [diaryText, setDiaryText] = useState('');
             
@@ -175,10 +358,17 @@
             const [showStickerPicker, setShowStickerPicker] = useState(false);
             const [activeStickerTab, setActiveStickerTab] = useState('builtin');
 
-            // 內建安全提示 (代替被 Iframe 擋掉的 Alert)
-            const [toast, setToast] = useState('');
+            // 帳號認證欄位
+            const [authEmail, setAuthEmail] = useState('');
+            const [authPassword, setAuthPassword] = useState('');
+            const [authMode, setAuthMode] = useState('login'); // login, register
+            const [authLoading, setAuthLoading] = useState(false);
 
-            // 自訂確認彈窗狀態 (代替被 Iframe 擋掉的 Confirm)
+            // 內建安全提示與但書宣告彈窗
+            const [toast, setToast] = useState('');
+            const [showDisclaimerPopup, setShowDisclaimerPopup] = useState(false);
+
+            // 自訂確認彈窗狀態
             const [stickerToDelete, setStickerToDelete] = useState(null);
             const [recordToDelete, setRecordToDelete] = useState(null);
 
@@ -196,12 +386,47 @@
             const canvasRef = useRef(null);
             const fileInputRef = useRef(null);
 
+            // --- 提升生命週期函數定義 (解決 Temporal Dead Zone) ---
+            async function handleCompleteTutorial() {
+                if (!user || !window.FirebaseServices) {
+                    setShowTutorial(false);
+                    return;
+                }
+                const { db, appId, setDoc, doc } = window.FirebaseServices;
+                try {
+                    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs'), { tutorialSeen: true });
+                } catch (err) {
+                    console.error("儲存偏好失敗", err);
+                }
+                setShowTutorial(false);
+            }
+
+            async function handleSave() {
+                if (!user || !window.FirebaseServices) return;
+                const { db, appId, collection, addDoc } = window.FirebaseServices;
+                try {
+                    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history'), {
+                        score: moodScore, 
+                        text: getMoodText(moodScore), 
+                        diary: diaryText, 
+                        stickers: selectedStickers,
+                        timestamp: Date.now()
+                    });
+                    setDiaryText(''); 
+                    setSelectedStickers([]);
+                    setView('history');
+                } catch (err) {
+                    console.error("儲存紀錄失敗", err);
+                    showToast("儲存失敗，請重試");
+                }
+            }
+
             const showToast = (msg) => {
                 setToast(msg);
                 setTimeout(() => setToast(''), 3000);
             };
 
-            // --- Firebase 初始化偵測 ---
+            // --- Firebase / LocalStorage 啟動辨識 ---
             useEffect(() => {
                 const checkReady = () => {
                     if (window.FirebaseServices) {
@@ -214,42 +439,74 @@
                 return () => window.removeEventListener('firebase-ready', checkReady);
             }, []);
 
-            // --- 身分驗證 ---
+            // --- 身分驗證與安全載入 (Rule 3: Auth Before Queries) ---
             useEffect(() => {
                 if (!isInit) return;
-                const { auth, db, appId, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getDoc, doc } = window.FirebaseServices;
-                
-                const startAuth = async () => {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(auth, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(auth);
+                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.FirebaseServices;
+
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) { 
+                        console.error("Auth Error", e); 
                     }
                 };
-                startAuth();
+                initAuth();
 
-                const unsubscribe = onAuthStateChanged(auth, async (u) => {
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
                     setUser(u);
-                    if (u) {
-                        const prefRef = doc(db, 'artifacts', appId, 'users', u.uid, 'settings', 'prefs');
-                        const snap = await getDoc(prefRef);
-                        if (!snap.exists() || !snap.data().tutorialSeen) setShowTutorial(true);
-                    }
                 });
                 return () => unsubscribe();
             }, [isInit]);
 
-            // --- 歷史紀錄記憶同步 ---
+            // --- 偏好與導覽初始化 ---
+            useEffect(() => {
+                if (!user || !isInit) return;
+                const { db, appId, getDoc, doc } = window.FirebaseServices;
+
+                const checkPrefsAndRedirect = async () => {
+                    try {
+                        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs');
+                        const snap = await getDoc(prefRef);
+                        
+                        if (user.isAnonymous) {
+                            const localGuestSeen = localStorage.getItem('guest_access_granted');
+                            if (localGuestSeen === 'true') {
+                                setView('home');
+                            }
+                        } else {
+                            setView('home');
+                        }
+
+                        if (!snap.exists() || !snap.data().tutorialSeen) {
+                            setShowTutorial(true);
+                        }
+                    } catch (e) {
+                        console.error("載入偏好失敗:", e);
+                    }
+                };
+
+                checkPrefsAndRedirect();
+            }, [user, isInit]);
+
+            // --- 歷史日記雲端同步 (依循 Rule 1 指定嚴格路徑) ---
             useEffect(() => {
                 if (!user || !isInit) return;
                 const { db, appId, collection, onSnapshot } = window.FirebaseServices;
                 const q = collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history');
-                return onSnapshot(q, (snap) => {
+                const unsub = onSnapshot(q, (snap) => {
                     setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                }, (err) => {
+                    console.error("同步心情紀錄失敗:", err);
                 });
+                return () => unsub();
             }, [user, isInit]);
 
-            // --- 自訂貼圖雲端記憶讀取 (從 Firestore 載入) ---
+            // --- 自訂貼圖雲端同步 (依循 Rule 1 指定嚴格路徑) ---
             useEffect(() => {
                 if (!user || !isInit) return;
                 const { db, appId, collection, onSnapshot } = window.FirebaseServices;
@@ -258,39 +515,12 @@
                 const unsubscribe = onSnapshot(q, (snap) => {
                     const loadedStickers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                     setCustomStickers(loadedStickers.sort((a, b) => b.timestamp - a.timestamp));
-                }, (err) => console.error("載入自訂貼圖失敗", err));
+                }, (err) => {
+                    console.error("載入自訂貼圖失敗", err);
+                });
 
                 return () => unsubscribe();
             }, [user, isInit]);
-
-            // --- 溫度計繪製 ---
-            useEffect(() => {
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                const ctx = canvas.getContext('2d');
-                const score = editingRecord ? editingRecord.score : moodScore;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                const color = getMoodColor(score);
-                
-                ctx.beginPath();
-                ctx.arc(30, 135, 24, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-
-                ctx.beginPath();
-                ctx.moveTo(20, 135); ctx.lineTo(20, 25);
-                ctx.arc(30, 25, 10, Math.PI, 0);
-                ctx.lineTo(40, 135);
-                ctx.fillStyle = '#f8fafc'; ctx.fill(); ctx.stroke();
-
-                const fillH = (110) * (score / 100);
-                ctx.fillStyle = color;
-                ctx.fillRect(23, 130 - fillH, 14, fillH);
-            }, [moodScore, view, editingRecord, isInit]);
-
-            const getMoodColor = (s) => s < 30 ? '#60a5fa' : s < 60 ? '#34d399' : s < 85 ? '#fbbf24' : '#f87171';
-            const getMoodText = (s) => s < 30 ? '平靜微憂' : s < 60 ? '愉快穩定' : s < 85 ? '焦慮上升' : '情緒緊繃';
 
             // --- 貼圖操作邏輯 ---
             const handleAddSticker = (sticker) => {
@@ -306,7 +536,6 @@
                 setSelectedStickers(prev => prev.filter((_, i) => i !== index));
             };
 
-            // 處理自訂貼圖上傳並進行 Canvas 智慧縮圖，再存入雲端資料庫
             const handleCustomStickerUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -316,7 +545,7 @@
                     const img = new Image();
                     img.onload = async () => {
                         const canvas = document.createElement('canvas');
-                        const maxDim = 120; // 壓縮至 120 像素，確保完美相容 
+                        const maxDim = 120; // 壓縮微縮化 120px
                         let w = img.width;
                         let h = img.height;
                         if (w > h) {
@@ -335,7 +564,6 @@
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, 0, 0, w, h);
                         
-                        // 轉為 Base64 格式，並使用 70% 壓縮率以極限縮小檔案，提升存取速度與不耗流量
                         const base64 = canvas.toDataURL('image/png', 0.7);
                         
                         if (user && isInit) {
@@ -347,7 +575,7 @@
                                     timestamp: Date.now()
                                 });
                             } catch (err) {
-                                console.error("上傳貼圖到雲端資料庫失敗", err);
+                                console.error("上傳貼圖失敗", err);
                             }
                         }
                     };
@@ -356,38 +584,78 @@
                 reader.readAsDataURL(file);
             };
 
-            // 刪除自訂貼圖並同步自雲端移除
             const handleDeleteCustomSticker = async (id) => {
                 if (user && isInit) {
                     const { db, appId, deleteDoc, doc } = window.FirebaseServices;
                     try {
                         await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers', id));
-                        // 如果當前被選取的貼圖中有被刪除的自訂貼圖，也一併移出選取
                         setSelectedStickers(prev => prev.filter(s => s.id !== id));
                     } catch (err) {
-                        console.error("刪除雲端貼圖失敗", err);
+                        console.error("刪除貼圖失敗", err);
                     }
                 }
             };
 
-            const handleCompleteTutorial = async () => {
-                const { db, appId, setDoc, doc } = window.FirebaseServices;
-                await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs'), { tutorialSeen: true });
-                setShowTutorial(false);
+            // --- 免登入直接體驗處理 ---
+            const handleGuestAccess = async () => {
+                localStorage.setItem('guest_access_granted', 'true');
+                if (isInit) {
+                    const { auth, signInAnonymously } = window.FirebaseServices;
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (e) {
+                        console.error("匿名登入故障", e);
+                    }
+                }
+                setView('home');
+                showToast("🌸 已進入免登入體驗模式！紀錄僅存於本機。");
             };
 
-            const handleSave = async () => {
-                const { db, appId, collection, addDoc } = window.FirebaseServices;
-                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history'), {
-                    score: moodScore, 
-                    text: getMoodText(moodScore), 
-                    diary: diaryText, 
-                    stickers: selectedStickers, // 心情日記同時紀錄選取之自訂與內建貼紙
-                    timestamp: Date.now()
-                });
-                setDiaryText(''); 
-                setSelectedStickers([]);
-                setView('history');
+            // --- 註冊與登入邏輯 ---
+            const handleAuthSubmit = async (e) => {
+                e.preventDefault();
+                if (!authEmail.trim() || !authPassword.trim()) {
+                    showToast("請輸入完整的 Email 與密碼喔！");
+                    return;
+                }
+                if (authPassword.length < 6) {
+                    showToast("密碼必須大於或等於 6 個字元。");
+                    return;
+                }
+
+                setAuthLoading(true);
+                const { auth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = window.FirebaseServices;
+
+                try {
+                    if (authMode === 'register') {
+                        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+                        showToast("🎉 註冊成功，已開啟專屬雲端帳號！");
+                    } else {
+                        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+                        showToast("🔑 登入成功，已同步您的手帳日記！");
+                    }
+                    localStorage.setItem('guest_access_granted', 'false');
+                    setAuthEmail('');
+                    setAuthPassword('');
+                    setView('home');
+                } catch (err) {
+                    console.error("認證錯誤", err);
+                    showToast(err.message || "帳號或密碼發生問題，請再試一次。");
+                } finally {
+                    setAuthLoading(false);
+                }
+            };
+
+            const handleSignOut = async () => {
+                const { auth, signOut } = window.FirebaseServices;
+                try {
+                    await signOut(auth);
+                    localStorage.removeItem('guest_access_granted');
+                    showToast("已成功登出。您的資料將在本機端安全儲存。");
+                    setView('welcome');
+                } catch (err) {
+                    console.error("登出失敗", err);
+                }
             };
 
             const exportTxt = () => {
@@ -402,7 +670,7 @@
                 link.download = "媽咪心情日記.txt"; link.click();
             };
 
-            // --- 串接 Gemini 聊天服務 ---
+            // --- 溫柔 Gemini 夥伴 ---
             const callGemini = async (prompt) => {
                 const apiKey = "";
                 const maxRetries = 5;
@@ -463,7 +731,7 @@
                 { title: "暖心與自訂貼圖 🧸", desc: "日記中可以加入我們精選的實體貼紙效果圖示，甚至可以上傳超音波照片做成雲端專屬貼圖，完全不佔手機空間喔！", icon: "smile" },
                 { title: "今日心情快篩 📝", desc: "首頁上方的卡片可以進行快速自我檢測。", icon: "check" },
                 { title: "日曆回顧與補寫 📅", desc: "點擊日期查看紀錄。若那天沒記，點選後點擊「補寫」即可補填。", icon: "edit" },
-                { title: "Gemini 溫柔陪伴 ✨", desc: "任何想傾訴的時候，點擊右下角對話泡泡，Gemini 會一直傾聽。", icon: "message" }
+                { title: "雲端帳號備份 ☁️", desc: "您可以註冊或登入個人專屬帳號。登入後，即便更換手機或清除瀏覽器，日記與貼圖也絕不會遺失喔！", icon: "user" }
             ];
 
             if (!isInit) return <div className="min-h-screen flex items-center justify-center bg-pink-50 text-pink-500 font-bold">開啟您的溫馨空間...</div>;
@@ -494,26 +762,53 @@
                         </div>
                     )}
 
+                    {/* 免登入但書說明彈窗 */}
+                    {showDisclaimerPopup && (
+                        <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[350] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
+                                <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-3 text-amber-500">
+                                    <Icon name="alert" size={24} />
+                                </div>
+                                <h5 className="font-bold text-slate-700 mb-2">本機儲存但書說明</h5>
+                                <p className="text-xs text-slate-500 mb-6 leading-relaxed text-left">
+                                    您目前正在使用「免登入體驗模式」。<br/><br/>
+                                    您的心情溫度日記與超音波照片貼圖將**僅儲存於當前設備的瀏覽器快取**中。如果您清除快取、重設手機、或更換新裝置登入，紀錄將無法找回喔！<br/><br/>
+                                    強烈建議您花費 10 秒免費註冊雲端帳號，即可獲得永久防遺失保障。
+                                </p>
+                                <div className="flex flex-col gap-2">
+                                    <button onClick={() => { setView('account'); setShowDisclaimerPopup(false); }} className="w-full bg-pink-500 text-white py-3 rounded-xl text-xs font-bold shadow-md hover:bg-pink-600 active:scale-95 transition-all">
+                                        立即登入/註冊
+                                    </button>
+                                    <button onClick={() => setShowDisclaimerPopup(false)} className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl text-xs font-bold active:scale-95">
+                                        我知道了，繼續體驗
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Header */}
                     <header className="w-full max-w-md flex justify-between items-center mb-4">
-                        <div className="flex items-center gap-2 text-pink-600 font-bold text-xl"><Icon name="heart" className="fill-pink-500" /> 媽咪心情空間</div>
+                        <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="flex items-center gap-2 text-pink-600 font-bold text-xl">
+                            <Icon name="heart" className="fill-pink-500" /> 媽咪心情空間
+                        </button>
                         <div className="flex gap-2">
-                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all"><Icon name="info" size={20}/></button>
-                            <button onClick={() => setView('home')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all"><Icon name="heart" size={20}/></button>
-                            <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all"><Icon name="calendar" size={20}/></button>
+                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all" title="查看說明"><Icon name="info" size={18}/></button>
+                            <button onClick={() => setView('account')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${user && !user.isAnonymous ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="雲端備份帳號"><Icon name="user" size={18}/></button>
+                            <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all" title="日記日曆"><Icon name="calendar" size={18}/></button>
                         </div>
                     </header>
 
                     <main className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl h-[680px] overflow-hidden flex flex-col relative border-4 border-white">
                         
-                        {/* 暖心 Toast 安全警告條 */}
+                        {/* 暖心 Toast 提示 */}
                         {toast && (
                             <div className="absolute top-4 left-4 right-4 bg-rose-500 text-white px-4 py-3 rounded-2xl text-xs font-bold text-center shadow-lg z-[250] animate-in slide-in-from-top-4 flex items-center justify-center gap-2">
                                 <Icon name="info" size={14} /> {toast}
                             </div>
                         )}
 
-                        {/* 自定義貼圖雲端刪除確認彈窗 (完美解決沙盒 Confirm 限制) */}
+                        {/* 自定義貼圖雲端刪除確認彈窗 */}
                         {stickerToDelete && (
                             <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
                                 <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
@@ -521,7 +816,7 @@
                                         <Icon name="trash" size={24} />
                                     </div>
                                     <h5 className="font-bold text-slate-700 mb-2">確定刪除貼圖嗎？</h5>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會從雲端永久移除這張自訂手帳貼圖喔！</p>
+                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久移除這張自訂手帳貼圖喔！</p>
                                     <div className="flex gap-3">
                                         <button onClick={() => setStickerToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
                                             取消
@@ -551,12 +846,16 @@
                                             取消
                                         </button>
                                         <button onClick={async () => {
-                                            const { db, appId, deleteDoc, doc } = window.FirebaseServices;
-                                            try {
-                                                await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', recordToDelete.id));
-                                                setRecordToDelete(null);
-                                            } catch (err) {
-                                                console.error("刪除日記失敗", err);
+                                            if (user && window.FirebaseServices) {
+                                                const { db, appId, deleteDoc, doc } = window.FirebaseServices;
+                                                try {
+                                                    const path = doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', recordToDelete.id);
+                                                    await deleteDoc(path);
+                                                    setRecordToDelete(null);
+                                                } catch (err) {
+                                                    console.error("刪除日記失敗", err);
+                                                    showToast("刪除日記失敗，請重試。");
+                                                }
                                             }
                                         }} className="flex-1 bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md hover:bg-rose-600 active:scale-95 transition-all">
                                             刪除
@@ -566,9 +865,54 @@
                             </div>
                         )}
 
-                        {/* HOME */}
+                        {/* VIEW: WELCOME (入口網頁：提供登入備份及免登入直接體驗選項) */}
+                        {view === 'welcome' && (
+                            <div className="p-6 flex flex-col h-full bg-gradient-to-b from-pink-50 to-white justify-between overflow-y-auto custom-scrollbar">
+                                <div className="text-center mt-6 space-y-3">
+                                    <div className="w-20 h-20 bg-pink-100 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner animate-pulse">
+                                        <Icon name="heart" className="fill-pink-500" size={40} />
+                                    </div>
+                                    <h2 className="text-2xl font-black text-pink-600 tracking-tight">媽咪心情溫度計</h2>
+                                    <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">陪妳溫柔記錄孕期的每一份感動，Gemini AI 語音傾聽，伴妳迎接新生命 👶</p>
+                                </div>
+
+                                <div className="space-y-4 my-6">
+                                    {/* 按鈕選項 1: 登入註冊雲端備份 */}
+                                    <button onClick={() => { setAuthMode('login'); setView('account'); }} className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-3xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
+                                        <Icon name="user" size={18} /> 登入 / 註冊雲端備份
+                                    </button>
+
+                                    {/* 按鈕選項 2: 免登入直接體驗 */}
+                                    <button onClick={handleGuestAccess} className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-3.5 rounded-3xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
+                                        <Icon name="right" size={18} /> 免登入直接體驗
+                                    </button>
+
+                                    {/* ⚠️ 暖心但書警示卡片 */}
+                                    <div className="bg-amber-50/80 border border-amber-100 rounded-[1.8rem] p-4 text-[11px] text-amber-800 leading-relaxed text-left flex gap-2.5">
+                                        <div className="pt-0.5"><Icon name="alert" size={14} className="text-amber-500 shrink-0" /></div>
+                                        <div>
+                                            <p className="font-extrabold mb-0.5">⚠️ 免登入體驗但書說明：</p>
+                                            <p>免登入狀態下，所有手帳日記與上傳的超音波照片貼圖**僅儲存於此設備的瀏覽器中**。若清除快取、重設裝置、或更換新手機，紀錄將無法找回喔！建議您註冊雲端帳號以獲得永久安全備份。</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <footer className="text-center text-[10px] text-slate-300 font-medium">© 2024 MOMMY'S MOOD HARBOR</footer>
+                            </div>
+                        )}
+
+                        {/* VIEW: HOME */}
                         {view === 'home' && (
                             <div className="p-5 flex flex-col h-full space-y-4 overflow-y-auto custom-scrollbar">
+                                
+                                {/* 如果是 Guest 匿名帳號，首頁頂部提示黃色但書徽章 */}
+                                {user && user.isAnonymous && (
+                                    <div onClick={() => setShowDisclaimerPopup(true)} className="bg-amber-50 hover:bg-amber-100 border border-amber-200/60 px-4 py-2 rounded-2xl text-[10px] text-amber-700 font-bold flex items-center justify-between cursor-pointer active:scale-98 transition-all">
+                                        <span className="flex items-center gap-1.5"><Icon name="alert" size={12} className="text-amber-500" /> 本機儲存模式 (紀錄未雲端備份)</span>
+                                        <span className="underline text-amber-900">查看但書說明 ➔</span>
+                                    </div>
+                                )}
+
                                 <div className="bg-gradient-to-r from-pink-500 to-pink-400 p-4 rounded-3xl text-white shadow-lg flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div className="p-2 bg-white/20 rounded-xl"><Icon name="check" size={20} /></div>
@@ -600,10 +944,10 @@
                                         </button>
                                     </div>
 
-                                    {/* 貼圖：大尺寸 & 點選後直接貼在文字欄位後面裝飾 (手帳效果) */}
+                                    {/* 貼圖背景融入 */}
                                     <div className="flex-grow flex flex-col relative overflow-hidden bg-slate-50 rounded-3xl p-5 shadow-inner min-h-[160px]">
                                         
-                                        {/* 裝飾背景貼圖層：貼在文字後面 */}
+                                        {/* 裝飾背景貼圖層 */}
                                         <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
                                             {selectedStickers.map((s, idx) => {
                                                 const rot = (idx * 15 - 15) + "deg";
@@ -617,7 +961,7 @@
                                             })}
                                         </div>
 
-                                        {/* 貼圖原圖預覽列 (尺寸同步放大為 w-12 h-12) */}
+                                        {/* 貼圖預覽列 */}
                                         {selectedStickers.length > 0 && (
                                             <div className="relative z-10 flex gap-2.5 p-1.5 bg-white/60 backdrop-blur-sm rounded-2xl mb-2 items-center flex-wrap w-fit max-w-full">
                                                 {selectedStickers.map((s, idx) => (
@@ -636,7 +980,6 @@
                                             </div>
                                         )}
 
-                                        {/* 輸入框 */}
                                         <textarea 
                                             value={diaryText} 
                                             onChange={(e) => setDiaryText(e.target.value)} 
@@ -653,11 +996,104 @@
                             </div>
                         )}
 
-                        {/* HISTORY (CALENDAR) */}
+                        {/* VIEW: ACCOUNT (雲端同步登入介面) */}
+                        {view === 'account' && (
+                            <div className="p-6 flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar">
+                                <div className="flex items-center gap-2 mb-6">
+                                    <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="p-2 bg-white rounded-full shadow-sm active:scale-90 transition-all text-slate-300"><Icon name="left"/></button>
+                                    <h3 className="text-lg font-bold">☁️ 雲端帳號備份</h3>
+                                </div>
+
+                                {window.FirebaseServices?.isMock && (
+                                    <div className="bg-amber-50 border border-amber-200 rounded-3xl p-4 mb-4 text-amber-800 text-xs flex gap-2">
+                                        <div className="pt-0.5"><Icon name="info" size={16} /></div>
+                                        <div>
+                                            <p className="font-bold mb-1">GitHub 靜態模擬模式</p>
+                                            <p className="leading-relaxed">目前正執行於靜態預覽，您可在此進行「模擬註冊與登入」來測試本機記憶切換。配對 Firebase 後即會轉為全球安全雲端帳戶備份！</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {user && !user.isAnonymous ? (
+                                    /* 登入後的狀態 */
+                                    <div className="flex-grow flex flex-col justify-between">
+                                        <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm text-center space-y-4">
+                                            <div className="w-16 h-16 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                                                <Icon name="user" size={32} />
+                                            </div>
+                                            <div>
+                                                <span className="bg-pink-100 text-pink-600 text-[10px] font-black uppercase px-2.5 py-1 rounded-full">雲端安全備份中</span>
+                                                <p className="text-slate-700 font-bold text-sm mt-3">{user.email}</p>
+                                            </div>
+                                            <p className="text-xs text-slate-400 leading-relaxed px-2">您的心情日記、自訂超音波貼圖皆已透過高強度密鑰存儲。在任何手機、平板或新瀏覽器登入此帳號，即可毫秒找回您的所有日記回憶！</p>
+                                        </div>
+                                        
+                                        <button onClick={handleSignOut} className="w-full bg-rose-500 hover:bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-2">
+                                            登出帳號
+                                        </button>
+                                    </div>
+                                ) : (
+                                    /* 登入與註冊表單 */
+                                    <form onSubmit={handleAuthSubmit} className="space-y-4">
+                                        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
+                                            <div className="flex border-b border-pink-50 pb-2 text-xs font-bold gap-4 mb-2">
+                                                <button type="button" onClick={() => setAuthMode('login')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'login' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>帳號登入</button>
+                                                <button type="button" onClick={() => setAuthMode('register')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'register' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>免費註冊備份</button>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">電子郵件 EMAIL</label>
+                                                    <div className="relative">
+                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="mail" size={16} /></div>
+                                                        <input 
+                                                            type="email" 
+                                                            value={authEmail} 
+                                                            onChange={e => setAuthEmail(e.target.value)} 
+                                                            placeholder="mommy@example.com" 
+                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">密碼 PASSWORD (至少6碼)</label>
+                                                    <div className="relative">
+                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="lock" size={16} /></div>
+                                                        <input 
+                                                            type="password" 
+                                                            value={authPassword} 
+                                                            onChange={e => setAuthPassword(e.target.value)} 
+                                                            placeholder="請輸入您的登入密碼" 
+                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <button 
+                                            type="submit" 
+                                            disabled={authLoading}
+                                            className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                                        >
+                                            {authLoading ? (
+                                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            ) : (
+                                                authMode === 'login' ? '登入雲端帳號' : '註冊個人雲端手帳'
+                                            )}
+                                        </button>
+                                        <p className="text-[10px] text-slate-400 text-center leading-relaxed">建立雲端帳號可將所有手帳紀錄安全存儲。更換任何設備登入時，資料將能全球光速同步！</p>
+                                    </form>
+                                )}
+                            </div>
+                        )}
+
+                        {/* VIEW: HISTORY */}
                         {view === 'history' && (
                             <div className="p-6 flex flex-col h-full bg-white relative">
                                 <div className="flex items-center justify-between mb-4">
-                                    <button onClick={() => setView('home')} className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90 text-slate-400"><Icon name="left"/></button>
+                                    <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90 text-slate-400"><Icon name="left"/></button>
                                     <div className="flex items-center gap-4">
                                         <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))} className="text-slate-300"><Icon name="left" size={16}/></button>
                                         <span className="font-bold text-sm text-slate-600">{currentMonth.getFullYear()}年 {currentMonth.getMonth()+1}月</span>
@@ -675,12 +1111,12 @@
                                         for (let i = 1; i <= total; i++) days.push(new Date(year, month, i));
                                         return days.map((d, i) => {
                                             if (!d) return <div key={i} className="h-9" />;
-                                            const hasRec = records.some(r => new Date(r.timestamp).toDateString() === d.toDateString());
+                                            const dayRecords = records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === d.toDateString());
                                             const isSelected = selectedDate.toDateString() === d.toDateString();
                                             return (
                                                 <button key={i} onClick={() => setSelectedDate(d)} className={`h-9 rounded-xl flex items-center justify-center relative transition-all ${isSelected ? 'bg-pink-500 text-white shadow-md font-bold' : 'hover:bg-pink-50 text-slate-400'}`}>
                                                     <span className="text-xs">{d.getDate()}</span>
-                                                    {hasRec && <div className={`w-1 h-1 rounded-full absolute bottom-1 ${isSelected ? 'bg-white' : 'bg-pink-400'}`} />}
+                                                    {dayRecords.length > 0 && <div className={`w-1 h-1 rounded-full absolute bottom-1 ${isSelected ? 'bg-white' : 'bg-pink-400'}`} />}
                                                 </button>
                                             );
                                         });
@@ -689,21 +1125,20 @@
                                 <div className="flex-grow overflow-y-auto space-y-3 custom-scrollbar">
                                     <div className="flex justify-between items-center px-1">
                                         <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{selectedDate.toLocaleDateString()} 紀錄</h4>
-                                        {records.filter(r => new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 && (
+                                        {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 && (
                                             <button onClick={() => setView('home')} className="text-[10px] text-pink-400 font-bold flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg active:scale-90"><Icon name="plus" size={12}/> 補寫日記</button>
                                         )}
                                     </div>
-                                    {records.filter(r => new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 ? (
+                                    {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 ? (
                                         <div className="text-center py-10 flex flex-col items-center gap-2 border-2 border-dashed border-slate-50 rounded-[2rem] m-2">
                                             <Icon name="edit" size={24} className="text-slate-100" />
                                             <p className="text-slate-200 text-[10px]">這天還沒有心情足跡喔</p>
                                         </div>
                                     ) : (
-                                        records.filter(r => new Date(r.timestamp).toDateString() === selectedDate.toDateString()).map(r => (
-                                            /* 手帳風格日記卡片 */
+                                        records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).map(r => (
                                             <div key={r.id} className="p-5 bg-slate-50 rounded-3xl border border-slate-100 group transition-all hover:shadow-md relative overflow-hidden min-h-[130px]">
                                                 
-                                                {/* 貼圖背景融入層 (貼在文字後面) */}
+                                                {/* 貼圖背景融入 */}
                                                 <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
                                                     {r.stickers && r.stickers.map((stk, sidx) => {
                                                         const rot = (sidx * 15 - 15) + "deg";
@@ -717,7 +1152,6 @@
                                                     })}
                                                 </div>
 
-                                                {/* 日記主體內容 */}
                                                 <div className="relative z-10">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <div className="flex items-center gap-2">
@@ -726,11 +1160,9 @@
                                                         </div>
                                                         <div className="flex gap-1">
                                                             <button onClick={() => { setEditingRecord({...r}); setSelectedStickers(r.stickers || []); }} className="p-2 text-slate-300 hover:text-pink-500 active:scale-90"><Icon name="edit" size={14} /></button>
-                                                            {/* 升級：移除 Confirm 使用安全自訂刪除彈窗 */}
                                                             <button onClick={() => setRecordToDelete(r)} className="p-2 text-slate-300 hover:text-red-500 active:scale-90"><Icon name="trash" size={14} /></button>
                                                         </div>
                                                     </div>
-                                                    
                                                     {r.diary && <p className="text-xs text-slate-600 leading-relaxed pt-2 border-t border-slate-200/50 font-medium">{r.diary}</p>}
                                                 </div>
                                             </div>
@@ -740,6 +1172,7 @@
                             </div>
                         )}
 
+                        {/* SURVEY */}
                         {view === 'survey' && (
                             <div className="p-6 flex flex-col h-full bg-slate-50">
                                 <div className="flex items-center gap-2 mb-6">
@@ -818,7 +1251,6 @@
                                     </div>
                                 </div>
 
-                                {/* 編輯紀錄時的貼圖管理 */}
                                 <div className="mb-4">
                                     <div className="flex justify-between items-center mb-2">
                                         <span className="text-xs font-bold text-slate-400">管理貼圖</span>
@@ -846,15 +1278,21 @@
 
                                 <textarea value={editingRecord.diary} onChange={e => setEditingRecord({...editingRecord, diary: e.target.value})} className="flex-grow bg-slate-50 rounded-3xl p-5 text-sm outline-none resize-none mb-6 border border-slate-100 shadow-inner" />
                                 <button onClick={() => { 
-                                    const { db, appId, updateDoc, doc } = window.FirebaseServices;
-                                    updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', editingRecord.id), { 
-                                        score: editingRecord.score, 
-                                        text: getMoodText(editingRecord.score), 
-                                        diary: editingRecord.diary,
-                                        stickers: selectedStickers // 更新貼圖
-                                    }); 
-                                    setEditingRecord(null); 
-                                    setSelectedStickers([]);
+                                    if (user && window.FirebaseServices) {
+                                        const { db, appId, updateDoc, doc } = window.FirebaseServices;
+                                        updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', editingRecord.id), { 
+                                            score: editingRecord.score, 
+                                            text: getMoodText(editingRecord.score), 
+                                            diary: editingRecord.diary,
+                                            stickers: selectedStickers
+                                        }).then(() => {
+                                            setEditingRecord(null); 
+                                            setSelectedStickers([]);
+                                        }).catch(err => {
+                                            console.error("更新日記失敗", err);
+                                            showToast("更新日記失敗，請重試。");
+                                        });
+                                    }
                                 }} className="w-full bg-pink-500 text-white py-4 rounded-2xl font-bold shadow-xl flex items-center justify-center gap-2 active:scale-95">
                                     <Icon name="save" size={18}/> 儲存更新
                                 </button>
@@ -871,7 +1309,6 @@
                                     </button>
                                 </div>
 
-                                {/* Tab 切換 */}
                                 <div className="flex border-b border-pink-50 mb-4 text-xs font-bold">
                                     <button onClick={() => setActiveStickerTab('builtin')} className={`flex-1 pb-3 text-center transition-all ${activeStickerTab === 'builtin' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>
                                         內建暖心貼圖
@@ -881,7 +1318,6 @@
                                     </button>
                                 </div>
 
-                                {/* 貼圖展示區域 */}
                                 <div className="flex-grow overflow-y-auto custom-scrollbar pb-4">
                                     {activeStickerTab === 'builtin' && (
                                         <div className="grid grid-cols-5 gap-4 justify-items-center">
@@ -895,22 +1331,18 @@
 
                                     {activeStickerTab === 'custom' && (
                                         <div className="grid grid-cols-4 gap-4 justify-items-center items-center">
-                                            {/* 上傳按鈕 */}
                                             <button onClick={() => fileInputRef.current.click()} className="w-16 h-16 rounded-2xl border-2 border-dashed border-pink-200 hover:border-pink-400 text-pink-400 flex items-center justify-center transition-colors active:scale-95" title="上傳照片做成貼圖">
                                                 <Icon name="plus" size={28} />
                                             </button>
                                             <input type="file" ref={fileInputRef} onChange={handleCustomStickerUpload} accept="image/*" className="hidden" />
 
-                                            {/* 已上傳貼圖 (雲端同步) */}
                                             {customStickers.map((stk) => (
                                                 <div key={stk.id} className="relative group w-16 h-16 animate-in fade-in zoom-in-75">
-                                                    {/* 點擊主圖為選擇貼圖 */}
                                                     <img 
                                                         src={stk.char} 
                                                         onClick={() => handleAddSticker(stk)}
                                                         className="w-full h-full object-contain rounded-xl border border-slate-100 sticker-effect cursor-pointer" 
                                                     />
-                                                    {/* 打叉：點擊會啟動高質感的自訂刪除彈窗，並使用 stopPropagation 阻止氣泡觸發 handleAddSticker */}
                                                     <button 
                                                         onClick={(e) => { 
                                                             e.stopPropagation();
