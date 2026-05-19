@@ -3,1373 +3,876 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>媽咪心情溫度計 - 溫馨陪伴空間</title>
-    <!-- Tailwind CSS -->
+    <title>幸孕檔案夾 - 雲端安全備份版 v5.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <!-- Babel for JSX -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Firebase SDKs with Account-auth Hybrid Loader -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        let firebaseConfig = null;
-        try {
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                firebaseConfig = JSON.parse(__firebase_config);
-            }
-        } catch (e) {
-            console.warn("Could not load cloud configurations. Switching to local account simulator.", e);
-        }
-
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'mommy-mood-tracker';
-
-        if (firebaseConfig) {
-            const app = initializeApp(firebaseConfig);
-            const auth = getAuth(app);
-            const db = getFirestore(app);
-
-            window.FirebaseServices = { 
-                auth, db, appId, signInAnonymously, onAuthStateChanged, signInWithCustomToken, 
-                createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
-                collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query,
-                isMock: false
-            };
-            window.dispatchEvent(new Event('firebase-ready'));
-        } else {
-            console.log("Running simulated cloud engine on GitHub / Local...");
-            setupLocalServices();
-        }
-
-        // 本地模擬帳號與儲存服務 (供 GitHub Pages 完美運行測試)
-        function setupLocalServices() {
-            window.localListeners = window.localListeners || {};
-            window.authCallbacks = window.authCallbacks || [];
-            
-            // 讀取目前的模擬登入 Session
-            let currentSession = JSON.parse(localStorage.getItem('local_current_user') || 'null');
-            
-            window.triggerLocalAuthState = (u) => {
-                currentSession = u;
-                window.authCallbacks.forEach(cb => cb(u));
-            };
-
-            const mockCollection = (db, ...paths) => ({ path: paths.join('/') });
-            const mockDoc = (db, ...paths) => ({ path: paths.join('/') });
-
-            window.FirebaseServices = {
-                auth: { get currentUser() { return currentSession; } },
-                db: 'local-db',
-                appId: appId,
-                isMock: true,
-                signInAnonymously: async () => {
-                    const guest = { uid: 'guest-mom-user', isAnonymous: true };
-                    localStorage.setItem('local_current_user', JSON.stringify(guest));
-                    window.triggerLocalAuthState(guest);
-                    return { user: guest };
-                },
-                signInWithCustomToken: async () => {
-                    const guest = { uid: 'guest-mom-user', isAnonymous: true };
-                    return { user: guest };
-                },
-                createUserWithEmailAndPassword: async (auth, email, password) => {
-                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
-                    if (users.find(u => u.email === email)) {
-                        throw { code: 'auth/email-already-in-use', message: '此 Email 已經被註冊囉！' };
-                    }
-                    const newUser = { uid: 'local_u_' + Date.now(), email: email, isAnonymous: false };
-                    users.push({ ...newUser, password });
-                    localStorage.setItem('local_mock_users', JSON.stringify(users));
-                    localStorage.setItem('local_current_user', JSON.stringify(newUser));
-                    window.triggerLocalAuthState(newUser);
-                    return { user: newUser };
-                },
-                signInWithEmailAndPassword: async (auth, email, password) => {
-                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
-                    const found = users.find(u => u.email === email && u.password === password);
-                    if (!found) {
-                        throw { code: 'auth/wrong-password', message: '帳號或密碼輸入錯誤，請再試一次。' };
-                    }
-                    const currUser = { uid: found.uid, email: found.email, isAnonymous: false };
-                    localStorage.setItem('local_current_user', JSON.stringify(currUser));
-                    window.triggerLocalAuthState(currUser);
-                    return { user: currUser };
-                },
-                signOut: async () => {
-                    localStorage.removeItem('local_current_user');
-                    window.triggerLocalAuthState(null);
-                },
-                onAuthStateChanged: (auth, callback) => {
-                    window.authCallbacks.push(callback);
-                    // 延遲發送當前狀態，確保 React 準備好
-                    setTimeout(() => callback(currentSession), 100);
-                    return () => {
-                        window.authCallbacks = window.authCallbacks.filter(cb => cb !== callback);
-                    };
-                },
-                collection: mockCollection,
-                doc: mockDoc,
-                addDoc: async (collRef, data) => {
-                    const path = collRef.path;
-                    const list = JSON.parse(localStorage.getItem(path) || '[]');
-                    const newDoc = { id: 'doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), ...data };
-                    list.push(newDoc);
-                    localStorage.setItem(path, JSON.stringify(list));
-                    if (window.localListeners[path]) {
-                        window.localListeners[path].forEach(cb => cb(list));
-                    }
-                    return newDoc;
-                },
-                onSnapshot: (query, callback) => {
-                    const path = query.path;
-                    if (!window.localListeners[path]) window.localListeners[path] = [];
-                    const listener = (list) => {
-                        callback({
-                            docs: list.map(item => ({
-                                id: item.id,
-                                data: () => item
-                            }))
-                        });
-                    };
-                    window.localListeners[path].push(listener);
-                    const currentList = JSON.parse(localStorage.getItem(path) || '[]');
-                    setTimeout(() => listener(currentList), 50);
-                    return () => {
-                        window.localListeners[path] = window.localListeners[path].filter(cb => cb !== listener);
-                    };
-                },
-                setDoc: async (docRef, data) => {
-                    const path = docRef.path;
-                    localStorage.setItem(path, JSON.stringify(data));
-                    return {};
-                },
-                getDoc: async (docRef) => {
-                    const path = docRef.path;
-                    const item = localStorage.getItem(path);
-                    return {
-                        exists: () => item !== null,
-                        data: () => JSON.parse(item)
-                    };
-                },
-                deleteDoc: async (docRef) => {
-                    const rawPath = docRef.path;
-                    const parts = rawPath.split('/');
-                    const idToDelete = parts.pop();
-                    const parentPath = parts.join('/');
-                    
-                    let list = JSON.parse(localStorage.getItem(parentPath) || '[]');
-                    list = list.filter(item => item.id !== idToDelete);
-                    localStorage.setItem(parentPath, JSON.stringify(list));
-                    if (window.localListeners[parentPath]) {
-                        window.localListeners[parentPath].forEach(cb => cb(list));
-                    }
-                    return {};
-                },
-                updateDoc: async (docRef, updatedFields) => {
-                    const rawPath = docRef.path;
-                    const parts = rawPath.split('/');
-                    const idToUpdate = parts.pop();
-                    const parentPath = parts.join('/');
-                    
-                    let list = JSON.parse(localStorage.getItem(parentPath) || '[]');
-                    list = list.map(item => item.id === idToUpdate ? { ...item, ...updatedFields } : item);
-                    localStorage.setItem(parentPath, JSON.stringify(list));
-                    if (window.localListeners[parentPath]) {
-                        window.localListeners[parentPath].forEach(cb => cb(list));
-                    }
-                    return {};
-                },
-                query: (q) => q
-            };
-            window.dispatchEvent(new Event('firebase-ready'));
-        }
-    </script>
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #fff1f2; margin: 0; overflow-x: hidden; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #fbcfe8; border-radius: 10px; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #ec4899; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        
-        .tutorial-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            z-index: 1000; display: flex; align-items: center; justify-content: center;
-            padding: 1.5rem; background-color: rgba(255, 241, 242, 0.95); backdrop-filter: blur(12px);
-        }
-
-        /* 經典實體貼紙白色邊框與陰影特效 */
-        .sticker-effect {
-            filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff) drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff) drop-shadow(0 4px 6px rgba(0,0,0,0.15));
-            transition: transform 0.2s ease-in-out;
-        }
-        .sticker-effect:hover {
-            transform: scale(1.1) rotate(2deg);
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        :root { --pink-primary: #f472b6; --pink-dark: #db2777; }
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #fffafb; color: #374151; -webkit-tap-highlight-color: transparent; }
+        .card { background: white; border-radius: 1rem; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border: 1px solid #fee2e2; margin-bottom: 1rem; overflow: hidden; }
+        .btn-pink { background: var(--pink-primary); color: white; border-radius: 0.5rem; transition: all 0.2s; font-weight: bold; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .btn-pink:hover { background: var(--pink-dark); }
+        .tab-active { border-bottom: 3px solid var(--pink-primary); color: var(--pink-primary); font-weight: bold; }
+        input, select, textarea { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.6rem; font-size: 0.875rem; width: 100%; }
+        label { font-size: 11px; color: #6b7280; font-weight: 500; margin-bottom: 0.25rem; display: block; }
+        .reference-table th, .reference-table td { font-size: 10px; padding: 4px; border: 1px solid #fce7f3; text-align: center; }
+        .delete-btn { color: #f87171; font-size: 11px; cursor: pointer; padding: 2px 8px; border: 1px solid #fecaca; border-radius: 6px; background: white; }
+        .delete-btn:hover { background-color: #fef2f2; color: #ef4444; }
+        .modal-overlay { background: rgba(0,0,0,0.4); backdrop-filter: blur(2px); transition: all 0.3s; }
+        .time-link { text-decoration: underline; cursor: pointer; color: #6b7280; }
+        .time-link:hover { color: var(--pink-primary); }
+        .alert-text { font-size: 10px; font-weight: bold; margin-top: 4px; line-height: 1.4; }
+        @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .encourage-pop { animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
     </style>
 </head>
-<body>
-    <div id="root"></div>
+<body class="pb-20">
+    <div class="max-w-md mx-auto p-4">
+        <!-- 頂部標頭 -->
+        <header class="text-center py-6 pb-2">
+            <h1 class="text-2xl font-bold text-pink-600">幸孕檔案夾</h1>
+            <p class="text-[10px] text-gray-400 mt-1 tracking-widest uppercase font-bold">Maternal Health Guide v5.0</p>
+        </header>
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        <!-- 帳號同步狀態列 (雙軌制) -->
+        <div class="mb-4">
+            <!-- 免登入狀態 (包含但書警告) -->
+            <div id="local-warning-box" class="p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-xs flex flex-col justify-between items-center gap-2">
+                <div class="text-amber-800 flex-1 leading-relaxed">
+                    <span class="font-bold">⚠️ 免登入模式：</span>資料僅存於此瀏覽器中。清除快取、網頁資料或更換手機，紀錄將會<span class="font-bold text-red-500">永久消失</span>！建議登入 Google 進行安全備份。
+                </div>
+                <button onclick="signInGoogle()" class="w-full mt-1.5 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg flex items-center justify-center gap-1.5 hover:bg-gray-50 transition text-xs shadow-sm">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M21.35,11.1H12v2.7h5.38c-0.24,1.28 -0.96,2.37 -2.04,3.1v2.6h3.3c1.93,-1.78 3.04,-4.4 3.04,-7.4c0,-0.37 -0.03,-0.74 -0.09,-1.1z" fill="#4285F4" />
+                        <path d="M12,20.5c2.3,0 4.23,-0.76 5.64,-2.1l-3.3,-2.6c-0.9,0.6 -2.07,0.97 -3.34,0.97 -2.57,0 -4.75,-1.74 -5.53,-4.07H2.05v2.7c1.47,2.9 4.49,4.9 8.01,4.9z" fill="#34A853" />
+                        <path d="M6.47,12.7c-0.2,-0.6 -0.31,-1.24 -0.31,-1.9s0.11,-1.3 0.31,-1.9V6.2H2.05C1.3,7.7 0.9,9.4 0.9,11.2s0.4,3.5 1.15,5V13.5l3.27,-2.7z" fill="#FBBC05" />
+                        <path d="M12,5.27c1.25,0 2.37,0.43 3.25,1.27l2.43,-2.43C16.2,2.75 14.28,2 12,2 8.48,2 5.46,4 4,6.9l3.27,2.7c0.78,-2.33 2.96,-4.07 5.53,-4.07z" fill="#EA4335" />
+                    </svg>
+                    使用 Google 帳號安全登入
+                </button>
+            </div>
 
-        // --- 穩定版 SVG 圖示組件 ---
-        const Icon = ({ name, size = 24, className = "" }) => {
-            const icons = {
-                heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
-                calendar: (
-                    <React.Fragment>
-                        <rect width="18" height="18" x="3" y="4" rx="2" ry="2" />
-                        <path d="M16 2v4M8 2v4M3 10h18" />
-                    </React.Fragment>
-                ),
-                info: (
-                    <React.Fragment>
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M12 16v-4M12 8h.01" />
-                    </React.Fragment>
-                ),
-                thermometer: <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" />,
-                check: (
-                    <React.Fragment>
-                        <path d="m9 11 3 3L22 4" />
-                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                    </React.Fragment>
-                ),
-                edit: (
-                    <React.Fragment>
-                        <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z" />
-                    </React.Fragment>
-                ),
-                message: <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
-                trash: <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />,
-                save: (
-                    <React.Fragment>
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                        <polyline points="17 21 17 13 7 13 7 21" />
-                        <polyline points="7 3 7 8 15 8" />
-                    </React.Fragment>
-                ),
-                download: (
-                    <React.Fragment>
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" x2="12" y1="15" y2="3" />
-                    </React.Fragment>
-                ),
-                left: <path d="m15 18-6-6 6-6" />,
-                right: <path d="m9 18 6-6 9-6" />,
-                x: <path d="M18 6 6 18M6 6l12 12" />,
-                plus: (
-                    <React.Fragment>
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M8 12h8M12 8v8" />
-                    </React.Fragment>
-                ),
-                sparkles: <path d="m12 3 1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3Z" />,
-                loader: <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />,
-                send: (
-                    <React.Fragment>
-                        <path d="m22 2-7 20-4-9-9-4Z" />
-                        <path d="M22 2 11 13" />
-                    </React.Fragment>
-                ),
-                image: (
-                    <React.Fragment>
-                        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                        <circle cx="9" cy="9" r="2" />
-                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                    </React.Fragment>
-                ),
-                smile: (
-                    <React.Fragment>
-                        <circle cx="12" cy="12" r="10" />
-                        <path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
-                    </React.Fragment>
-                ),
-                user: (
-                    <React.Fragment>
-                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                        <circle cx="12" cy="7" r="4" />
-                    </React.Fragment>
-                ),
-                lock: (
-                    <React.Fragment>
-                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </React.Fragment>
-                ),
-                mail: (
-                    <React.Fragment>
-                        <rect width="20" height="16" x="2" y="4" rx="2" />
-                        <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-                    </React.Fragment>
-                ),
-                alert: (
-                    <React.Fragment>
-                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </React.Fragment>
-                )
-            };
-            return (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                    {icons[name]}
-                </svg>
-            );
-        };
+            <!-- Google 已登入雲端備份狀態 -->
+            <div id="cloud-status-box" class="hidden p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs flex justify-between items-center gap-2">
+                <div class="text-emerald-800 flex-1 flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>雲端安全備份中：已連結 <b><span id="cloud-username"></span></b></span>
+                </div>
+                <button onclick="signOutGoogle()" class="px-3 py-1 bg-white border border-red-200 text-red-500 font-bold rounded-lg hover:bg-red-50 transition text-xs shadow-sm">
+                    登出
+                </button>
+            </div>
+        </div>
 
-        // --- 內建貼圖列表 ---
-        const BUILTIN_STICKERS = [
-            { id: "s_baby", char: "👶", type: "emoji" },
-            { id: "s_bottle", char: "🍼", type: "emoji" },
-            { id: "s_pregnant", char: "🤰", type: "emoji" },
-            { id: "s_teddy", char: "🧸", type: "emoji" },
-            { id: "s_feet", char: "👣", type: "emoji" },
-            { id: "s_heart", char: "💖", type: "emoji" },
-            { id: "s_coffee", char: "☕", type: "emoji" },
-            { id: "s_star", char: "⭐", type: "emoji" },
-            { id: "s_clover", char: "🍀", type: "emoji" },
-            { id: "s_sun", char: "☀️", type: "emoji" },
-            { id: "s_smile", char: "😊", type: "emoji" },
-            { id: "s_cry", char: "😭", type: "emoji" },
-            { id: "s_tired", char: "😴", type: "emoji" },
-            { id: "s_love", char: "🥰", type: "emoji" },
-            { id: "s_party", char: "🥳", type: "emoji" }
+        <!-- 導覽列 -->
+        <nav class="flex border-b border-gray-100 mb-6 text-center text-xs sticky top-0 bg-white z-10 overflow-x-auto whitespace-nowrap">
+            <button onclick="showPage('bmi')" id="btn-bmi" class="flex-1 py-3 tab-active">體重管理</button>
+            <button onclick="showPage('checkup')" id="btn-checkup" class="flex-1 py-3 text-gray-400">產檢紀錄</button>
+            <button onclick="showPage('health')" id="btn-health" class="flex-1 py-3 text-gray-400">血壓血糖</button>
+            <button onclick="showPage('exercise')" id="btn-exercise" class="flex-1 py-3 text-gray-400">好孕動動</button>
+            <button onclick="showPage('data')" id="btn-data" class="flex-1 py-3 text-gray-400">備份管理</button>
+        </nav>
+
+        <!-- 1. 體重管理 -->
+        <section id="page-bmi" class="space-y-4">
+            <div class="card p-3 bg-pink-50 border-pink-100">
+                <h4 class="text-xs font-bold text-pink-700 mb-2 flex items-center">💡 孕期增重建議參考表</h4>
+                <table class="w-full reference-table bg-white">
+                    <thead class="bg-pink-100 text-pink-800">
+                        <tr><th>孕前BMI</th><th>建議總增重</th><th>12週後增重(kg/週)</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>&lt;18.5</td><td>12.5~18 kg</td><td>+0.5</td></tr>
+                        <tr class="bg-pink-50"><td>18.5~24.9</td><td>11.5~16 kg</td><td>+0.5</td></tr>
+                        <tr><td>25.0~29.9</td><td>7~11.5 kg</td><td>+0.3</td></tr>
+                        <tr class="bg-pink-50"><td>&ge;30.0</td><td>5~9 kg</td><td>+0.25</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card p-4">
+                <h3 class="font-bold text-pink-600 mb-3 text-sm border-l-4 border-pink-500 pl-2">1. 孕前資料設定</h3>
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div><label>身高 (cm)</label><input type="number" id="h" placeholder="例如: 160"></div>
+                    <div><label>孕前體重 (kg)</label><input type="number" id="w" placeholder="例如: 50"></div>
+                </div>
+                <button onclick="saveProfile()" class="w-full btn-pink py-2.5 text-sm shadow-sm">儲存設定</button>
+                <div id="bmi-result" class="hidden mt-3 p-3 bg-white border border-pink-100 rounded-lg text-xs leading-relaxed"></div>
+            </div>
+
+            <div class="card p-4">
+                <h3 class="font-bold text-gray-700 mb-3 text-sm border-l-4 border-gray-400 pl-2">2. 體重紀錄與曲線</h3>
+                <div class="flex gap-2 mb-4 items-end">
+                    <div class="w-24"><label>週數</label><input type="number" id="weight-week" placeholder="週"></div>
+                    <div class="flex-1"><label>體重 (kg)</label><input type="number" id="now-w" step="0.1"></div>
+                    <button onclick="addWeight()" class="btn-pink h-[42px] px-6 text-sm">紀錄</button>
+                </div>
+                <div class="h-48 mb-4 bg-gray-50 rounded-lg"><canvas id="weightChart"></canvas></div>
+                <div id="weight-list" class="space-y-3 max-h-80 overflow-y-auto"></div>
+            </div>
+        </section>
+
+        <!-- 2. 產檢紀錄 -->
+        <section id="page-checkup" class="hidden space-y-4">
+            <div class="card p-4 border-t-4 border-pink-400">
+                <h3 class="font-bold text-gray-700 mb-4 text-sm flex justify-between items-center">
+                    產檢詳情填寫
+                    <select id="cu-index" onchange="loadCheckupTemplate()" class="w-32 py-1 px-2 text-xs"></select>
+                </h3>
+                <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+                    <div><label>檢查日期</label><input type="date" id="cu-date"></div>
+                    <div><label>懷孕週數</label><input type="number" id="cu-week"></div>
+                    <div><label>體重 (kg)</label><input type="number" id="cu-weight" step="0.1"></div>
+                    <div><label>血壓 (mmHg)</label><input type="text" id="cu-bp" placeholder="110/70"></div>
+                    <div><label>胎心音 (次/分)</label><input type="number" id="cu-fhr"></div>
+                    <div><label>尿糖</label><select id="cu-sugar"><option>-</option><option>+</option></select></div>
+                    <div><label>尿蛋白</label><select id="cu-protein"><option>-</option><option>+</option><option>++</option><option>+++</option></select></div>
+                    <div><label>浮腫</label><select id="cu-edema"><option>-</option><option>+</option><option>++</option><option>+++</option><option>++++</option></select></div>
+                    <div class="col-span-2"><label>靜脈曲張/備註</label><input type="text" id="cu-varicose"></div>
+                    <div class="col-span-2">
+                        <label>醫囑建議</label>
+                        <select id="cu-note">
+                            <option>無特殊發現</option><option>需注意或異常項目</option><option>需追蹤</option><option>需轉介</option>
+                        </select>
+                    </div>
+                    <div class="col-span-2 mt-2 bg-yellow-50 p-3 rounded-lg border border-yellow-100">
+                        <label class="text-amber-700 font-bold">🗓️ 下次產檢預約日期</label>
+                        <input type="date" id="cu-next" class="bg-white">
+                    </div>
+                </div>
+                <button onclick="saveCheckup()" class="w-full btn-pink py-3 text-sm shadow-md">儲存紀錄</button>
+            </div>
+            <h4 class="text-sm font-bold text-pink-600 px-1 mb-2 italic">歷史產檢存檔</h4>
+            <div id="checkup-history" class="space-y-3"></div>
+        </section>
+
+        <!-- 3. 血壓血糖 -->
+        <section id="page-health" class="hidden space-y-4">
+            <div class="card p-4 border-l-4 border-blue-400">
+                <h3 class="font-bold text-gray-700 mb-3 text-sm">日常血壓紀錄</h3>
+                <div class="space-y-3 mb-3 text-sm">
+                    <input type="datetime-local" id="bp-dt">
+                    <select id="bp-type">
+                        <option value="morning">晨起量測</option>
+                        <option value="night">睡前量測</option>
+                        <option value="anytime">一般時段 / 隨時</option>
+                    </select>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="number" id="bp-sys" placeholder="收縮壓">
+                        <input type="number" id="bp-dia" placeholder="舒張壓">
+                    </div>
+                </div>
+                <button onclick="addBP()" class="w-full btn-pink py-2 bg-blue-500 hover:bg-blue-600">紀錄血壓</button>
+            </div>
+
+            <div class="card p-4 border-l-4 border-green-400">
+                <h3 class="font-bold text-gray-700 mb-3 text-sm">日常血糖紀錄</h3>
+                <div class="space-y-3 mb-3 text-sm">
+                    <input type="datetime-local" id="glu-dt">
+                    <select id="glu-type">
+                        <option value="fasting">晨起空腹</option>
+                        <option value="after2h">飯後2小時</option>
+                        <option value="other">其他時段</option>
+                    </select>
+                    <input type="number" id="glu-val" placeholder="血糖值 mg/dL">
+                </div>
+                <button onclick="addGlu()" class="w-full btn-pink py-2 bg-green-500 hover:bg-green-600">紀錄血糖</button>
+            </div>
+            <div class="px-1 text-[10px] text-gray-400 italic">💡 備註：在紀錄列表按壓日期時間可回填修正數據</div>
+            <div id="bp-list" class="space-y-2"></div>
+            <div id="glu-list" class="space-y-2"></div>
+        </section>
+
+        <!-- 好孕動動 -->
+        <section id="page-exercise" class="hidden space-y-4">
+            <div class="card p-4 border-l-4 border-purple-400">
+                <h3 class="font-bold text-gray-700 mb-3 text-sm flex justify-between items-center">
+                    好孕動動紀錄
+                    <span class="text-[10px] text-purple-500 font-normal">適度運動讓產程更順利 ✨</span>
+                </h3>
+                <div class="space-y-3 mb-3 text-sm">
+                    <input type="datetime-local" id="ex-dt">
+                    <div>
+                        <label>運動項目 (可直接打字)</label>
+                        <input type="text" id="ex-name" placeholder="例如：去公園散步、孕婦瑜珈...">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1">
+                            <label>運動時長</label>
+                            <input type="number" id="ex-duration" placeholder="分鐘">
+                        </div>
+                        <span class="text-xs whitespace-nowrap text-gray-500 mt-5">分鐘</span>
+                    </div>
+                </div>
+                <button onclick="addExercise()" class="w-full btn-pink py-2 bg-purple-500 hover:bg-purple-650">儲存運動紀錄</button>
+            </div>
+            <div id="exercise-list" class="space-y-2"></div>
+        </section>
+
+        <!-- 5. 備份管理 -->
+        <section id="page-data" class="hidden space-y-4">
+            <div class="card p-5 space-y-4">
+                <h3 class="font-bold text-gray-700 text-sm border-l-4 border-pink-500 pl-2">☁️ 雲端與本機備份說明</h3>
+                <div class="text-[11px] text-gray-500 space-y-2 leading-relaxed">
+                    <p><span class="font-bold text-pink-600">本機存儲（免登入）：</span>紀錄保存在本瀏覽器中。若您清除快取、網頁資料或更換手機，<span class="text-red-500 font-bold">所有資料將永久遺失！</span></p>
+                    <p><span class="font-bold text-emerald-600">雲端備份（Google 登入）：</span>資料會自動加密備份至您的 Google 帳號下，即使更換手機或清除資料，只需再次登入即可瞬間還原！</p>
+                </div>
+            </div>
+
+            <div class="card p-5 space-y-4">
+                <h3 class="font-bold text-gray-700 text-sm border-l-4 border-indigo-500 pl-2">💾 手動匯入與匯出 (JSON)</h3>
+                <p class="text-[11px] text-gray-500 leading-relaxed">除了自動同步外，您也可以隨時手動下載純文字備份檔。</p>
+                <div class="grid grid-cols-1 gap-3">
+                    <button onclick="exportBackup()" class="w-full btn-pink py-2.5 bg-indigo-500 hover:bg-indigo-600">產生備份還原檔 (.json)</button>
+                    <div class="relative">
+                        <input type="file" id="importFile" class="hidden" onchange="importBackup(this)">
+                        <button onclick="document.getElementById('importFile').click()" class="w-full btn-pink py-2.5 bg-emerald-500 hover:bg-emerald-600">匯入並還原資料 (.json)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card p-5 space-y-4">
+                <h3 class="font-bold text-gray-700 text-sm border-l-4 border-blue-400 pl-2">📊 報表與匯出</h3>
+                <button onclick="exportCSV()" class="w-full btn-pink py-3">匯出 Excel (CSV) 檔案</button>
+                <button onclick="triggerClearAll()" class="w-full py-2 text-red-400 text-xs border rounded mt-10">清空本地所有紀錄</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- 刪除確認彈窗 (Modal) -->
+    <div id="confirmModal" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-6">
+        <div class="bg-white rounded-2xl w-full max-w-xs p-6 shadow-2xl text-center">
+            <h3 class="text-lg font-bold text-gray-800 mb-2">確定執行嗎？</h3>
+            <p id="confirm-msg" class="text-sm text-gray-500 mb-6">此動作無法復原，請確認是否繼續？</p>
+            <div class="flex gap-3">
+                <button onclick="closeModal()" class="flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg font-bold">取消</button>
+                <button onclick="executeDelete()" id="confirm-btn" class="flex-1 py-2 bg-red-500 text-white rounded-lg font-bold">確認</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 雲端同步衝突彈窗 (Modal) -->
+    <div id="syncConflictModal" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-6">
+        <div class="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl text-center animate-bounce-short">
+            <div class="text-4xl mb-2">🔄</div>
+            <h3 class="text-lg font-bold text-gray-800 mb-2">偵測到同步衝突</h3>
+            <p class="text-xs text-gray-500 mb-6 leading-relaxed">
+                我們在您的 Google 雲端發現了歷史備份，但您的這台手機也有本機資料，請選擇：
+            </p>
+            <div class="space-y-2.5">
+                <button onclick="handleSyncChoice('cloud')" class="w-full py-2.5 bg-pink-500 text-white rounded-lg font-bold text-xs shadow">採用雲端備份（覆蓋本機）</button>
+                <button onclick="handleSyncChoice('local')" class="w-full py-2.5 bg-blue-500 text-white rounded-lg font-bold text-xs shadow">將本機上傳（覆蓋雲端）</button>
+                <button onclick="handleSyncChoice('merge')" class="w-full py-2.5 bg-emerald-500 text-white rounded-lg font-bold text-xs shadow">合併兩者資料（保留完整紀錄）</button>
+                <button onclick="handleSyncChoice('cancel')" class="w-full py-2 bg-gray-100 text-gray-600 rounded-lg text-xs">暫時登出（保持免登入狀態）</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 鼓勵彈窗 -->
+    <div id="encourageModal" class="hidden fixed inset-0 z-50 modal-overlay flex items-center justify-center p-6">
+        <div class="bg-white rounded-2xl w-full max-w-xs p-8 shadow-2xl text-center encourage-pop">
+            <div class="text-5xl mb-4">✨</div>
+            <h3 class="text-xl font-bold text-pink-600 mb-3">媽咪妳好棒！</h3>
+            <p id="encourage-msg" class="text-sm text-gray-600 leading-relaxed mb-6"></p>
+            <button onclick="closeEncourage()" class="w-full btn-pink py-3 font-bold">我會繼續加油！</button>
+        </div>
+    </div>
+
+    <!-- 提示小浮窗 -->
+    <div id="toast" class="hidden fixed top-20 left-1/2 -translate-x-1/2 z-[60] bg-gray-800 text-white px-4 py-2 rounded-full text-xs shadow-lg opacity-0 transition-all"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // --- Firebase 安全防護與模擬偵測 ---
+        let app, auth, db, appId;
+        let isFirebaseReady = false;
+        let isCloudSyncEnabled = localStorage.getItem('preg_cloud_sync_enabled') === 'true';
+        let currentUser = null; 
+
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            try {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                isFirebaseReady = true;
+            } catch (e) {
+                console.error("Firebase Initialization Failed", e);
+            }
+        }
+
+        // --- 資料核心 ---
+        let userData = { profile: null, weights: [], checkups: {}, bp: [], glu: [], exercise: [] };
+        let pendingAction = null; 
+        let chart = null;
+
+        const encourageMsgs = [
+            "適度的運動對妳和寶寶的體力很有幫助喔！",
+            "妳剛才的活動讓血液循環更好了，寶寶也在裡面感覺很舒服喔！",
+            "保持每天動一動，產後體力恢復會更快，妳真棒！",
+            "媽咪今天的堅持，是給寶寶最好的健康禮物！",
+            "動完之後心情是不是變好了？妳正在做一件很偉大的事！"
         ];
 
-        const App = () => {
-            const [isInit, setIsInit] = useState(false);
-            const [user, setUser] = useState(null);
-            const [view, setView] = useState('welcome'); // 預設進到 welcome 入口頁面
-            const [moodScore, setMoodScore] = useState(50);
-            const [diaryText, setDiaryText] = useState('');
+        const checkupTemplates = [
+            { id: 1, name: "第 1 次產檢", week: 8 }, { id: 2, name: "第 2 次產檢", week: 12 },
+            { id: 3, name: "第 3 次產檢", week: 16 }, { id: 4, name: "第 4 次產檢", week: 20 },
+            { id: 5, name: "第 5 次產檢", week: 24 }, { id: 6, name: "第 6 次產檢", week: 28 },
+            { id: 7, name: "第 7 次產檢", week: 32 }, { id: 8, name: "第 8 次產檢", week: 36 },
+            { id: 9, name: "額外產檢紀錄", week: 0 }
+        ];
+
+        // --- 初始化 & 雙軌登入監聽 ---
+        async function init() {
+            // 先載入本機快取資料 (避免等待)
+            const saved = localStorage.getItem('preg_pro_v4_final_final');
+            if(saved) userData = JSON.parse(saved);
+
+            refreshTimeInputs();
             
-            // 貼圖狀態管理
-            const [selectedStickers, setSelectedStickers] = useState([]);
-            const [customStickers, setCustomStickers] = useState([]);
-            const [showStickerPicker, setShowStickerPicker] = useState(false);
-            const [activeStickerTab, setActiveStickerTab] = useState('builtin');
+            // 產檢選單
+            const select = document.getElementById('cu-index');
+            select.innerHTML = checkupTemplates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
 
-            // 帳號認證欄位
-            const [authEmail, setAuthEmail] = useState('');
-            const [authPassword, setAuthPassword] = useState('');
-            const [authMode, setAuthMode] = useState('login'); // login, register
-            const [authLoading, setAuthLoading] = useState(false);
-
-            // 內建安全提示與但書宣告彈窗
-            const [toast, setToast] = useState('');
-            const [showDisclaimerPopup, setShowDisclaimerPopup] = useState(false);
-
-            // 自訂確認彈窗狀態
-            const [stickerToDelete, setStickerToDelete] = useState(null);
-            const [recordToDelete, setRecordToDelete] = useState(null);
-
-            const [records, setRecords] = useState([]);
-            const [chatMessages, setChatMessages] = useState([{ role: 'assistant', text: '親愛的媽咪，我是 Gemini。今天感覺如何？任何想說的心裡話，都可以隨時跟我分享喔。' }]);
-            const [inputMessage, setInputMessage] = useState('');
-            const [isTyping, setIsTyping] = useState(false);
-            const [selectedDate, setSelectedDate] = useState(new Date());
-            const [currentMonth, setCurrentMonth] = useState(new Date());
-            const [showTutorial, setShowTutorial] = useState(false);
-            const [tutorialStep, setTutorialStep] = useState(0);
-            const [surveyResults, setSurveyResults] = useState({ q1: null, q2: null });
-            const [showSurveyResult, setShowSurveyResult] = useState(false);
-            const [editingRecord, setEditingRecord] = useState(null);
-            const canvasRef = useRef(null);
-            const fileInputRef = useRef(null);
-
-            // --- 提升生命週期函數定義 (解決 Temporal Dead Zone) ---
-            async function handleCompleteTutorial() {
-                if (!user || !window.FirebaseServices) {
-                    setShowTutorial(false);
-                    return;
-                }
-                const { db, appId, setDoc, doc } = window.FirebaseServices;
-                try {
-                    await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs'), { tutorialSeen: true });
-                } catch (err) {
-                    console.error("儲存偏好失敗", err);
-                }
-                setShowTutorial(false);
-            }
-
-            async function handleSave() {
-                if (!user || !window.FirebaseServices) return;
-                const { db, appId, collection, addDoc } = window.FirebaseServices;
-                try {
-                    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history'), {
-                        score: moodScore, 
-                        text: getMoodText(moodScore), 
-                        diary: diaryText, 
-                        stickers: selectedStickers,
-                        timestamp: Date.now()
-                    });
-                    setDiaryText(''); 
-                    setSelectedStickers([]);
-                    setView('history');
-                } catch (err) {
-                    console.error("儲存紀錄失敗", err);
-                    showToast("儲存失敗，請重試");
-                }
-            }
-
-            const showToast = (msg) => {
-                setToast(msg);
-                setTimeout(() => setToast(''), 3000);
-            };
-
-            // --- Firebase / LocalStorage 啟動辨識 ---
-            useEffect(() => {
-                const checkReady = () => {
-                    if (window.FirebaseServices) {
-                        setIsInit(true);
-                        return true;
-                    }
-                    return false;
-                };
-                if (!checkReady()) window.addEventListener('firebase-ready', checkReady);
-                return () => window.removeEventListener('firebase-ready', checkReady);
-            }, []);
-
-            // --- 身分驗證與安全載入 (Rule 3: Auth Before Queries) ---
-            useEffect(() => {
-                if (!isInit) return;
-                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.FirebaseServices;
-
-                const initAuth = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (e) { 
-                        console.error("Auth Error", e); 
-                    }
-                };
-                initAuth();
-
-                const unsubscribe = onAuthStateChanged(auth, (u) => {
-                    setUser(u);
-                });
-                return () => unsubscribe();
-            }, [isInit]);
-
-            // --- 偏好與導覽初始化 ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, getDoc, doc } = window.FirebaseServices;
-
-                const checkPrefsAndRedirect = async () => {
-                    try {
-                        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs');
-                        const snap = await getDoc(prefRef);
-                        
-                        if (user.isAnonymous) {
-                            const localGuestSeen = localStorage.getItem('guest_access_granted');
-                            if (localGuestSeen === 'true') {
-                                setView('home');
-                            }
-                        } else {
-                            setView('home');
-                        }
-
-                        if (!snap.exists() || !snap.data().tutorialSeen) {
-                            setShowTutorial(true);
-                        }
-                    } catch (e) {
-                        console.error("載入偏好失敗:", e);
-                    }
-                };
-
-                checkPrefsAndRedirect();
-            }, [user, isInit]);
-
-            // --- 歷史日記雲端同步 (依循 Rule 1 指定嚴格路徑) ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
-                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history');
-                const unsub = onSnapshot(q, (snap) => {
-                    setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                }, (err) => {
-                    console.error("同步心情紀錄失敗:", err);
-                });
-                return () => unsub();
-            }, [user, isInit]);
-
-            // --- 自訂貼圖雲端同步 (依循 Rule 1 指定嚴格路徑) ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
-                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers');
-                
-                const unsubscribe = onSnapshot(q, (snap) => {
-                    const loadedStickers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setCustomStickers(loadedStickers.sort((a, b) => b.timestamp - a.timestamp));
-                }, (err) => {
-                    console.error("載入自訂貼圖失敗", err);
-                });
-
-                return () => unsubscribe();
-            }, [user, isInit]);
-
-            // --- 貼圖操作邏輯 ---
-            const handleAddSticker = (sticker) => {
-                if (selectedStickers.length >= 5) {
-                    showToast("最多只能選擇 5 張貼圖裝飾日記喔！");
-                    return;
-                }
-                setSelectedStickers(prev => [...prev, sticker]);
-                setShowStickerPicker(false);
-            };
-
-            const handleRemoveSelectedSticker = (index) => {
-                setSelectedStickers(prev => prev.filter((_, i) => i !== index));
-            };
-
-            const handleCustomStickerUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = async () => {
-                        const canvas = document.createElement('canvas');
-                        const maxDim = 120; // 壓縮微縮化 120px
-                        let w = img.width;
-                        let h = img.height;
-                        if (w > h) {
-                            if (w > maxDim) {
-                                h = Math.round((h * maxDim) / w);
-                                w = maxDim;
-                            }
-                        } else {
-                            if (h > maxDim) {
-                                w = Math.round((w * maxDim) / h);
-                                h = maxDim;
-                            }
-                        }
-                        canvas.width = w;
-                        canvas.height = h;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, w, h);
-                        
-                        const base64 = canvas.toDataURL('image/png', 0.7);
-                        
-                        if (user && isInit) {
-                            const { db, appId, collection, addDoc } = window.FirebaseServices;
-                            try {
-                                await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers'), {
-                                    char: base64,
-                                    type: 'custom',
-                                    timestamp: Date.now()
-                                });
-                            } catch (err) {
-                                console.error("上傳貼圖失敗", err);
-                            }
-                        }
-                    };
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
-            };
-
-            const handleDeleteCustomSticker = async (id) => {
-                if (user && isInit) {
-                    const { db, appId, deleteDoc, doc } = window.FirebaseServices;
-                    try {
-                        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers', id));
-                        setSelectedStickers(prev => prev.filter(s => s.id !== id));
-                    } catch (err) {
-                        console.error("刪除貼圖失敗", err);
-                    }
-                }
-            };
-
-            // --- 免登入直接體驗處理 ---
-            const handleGuestAccess = async () => {
-                localStorage.setItem('guest_access_granted', 'true');
-                if (isInit) {
-                    const { auth, signInAnonymously } = window.FirebaseServices;
-                    try {
-                        await signInAnonymously(auth);
-                    } catch (e) {
-                        console.error("匿名登入故障", e);
-                    }
-                }
-                setView('home');
-                showToast("🌸 已進入免登入體驗模式！紀錄僅存於本機。");
-            };
-
-            // --- 註冊與登入邏輯 ---
-            const handleAuthSubmit = async (e) => {
-                e.preventDefault();
-                if (!authEmail.trim() || !authPassword.trim()) {
-                    showToast("請輸入完整的 Email 與密碼喔！");
-                    return;
-                }
-                if (authPassword.length < 6) {
-                    showToast("密碼必須大於或等於 6 個字元。");
-                    return;
-                }
-
-                setAuthLoading(true);
-                const { auth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = window.FirebaseServices;
-
-                try {
-                    if (authMode === 'register') {
-                        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
-                        showToast("🎉 註冊成功，已開啟專屬雲端帳號！");
+            // 初始化與檢測 Google 登入狀態
+            if (isFirebaseReady) {
+                onAuthStateChanged(auth, async (user) => {
+                    if (user && !user.isAnonymous && isCloudSyncEnabled) {
+                        handleUserLogin(user);
                     } else {
-                        await signInWithEmailAndPassword(auth, authEmail, authPassword);
-                        showToast("🔑 登入成功，已同步您的手帳日記！");
+                        handleUserLogout();
                     }
-                    localStorage.setItem('guest_access_granted', 'false');
-                    setAuthEmail('');
-                    setAuthPassword('');
-                    setView('home');
-                } catch (err) {
-                    console.error("認證錯誤", err);
-                    showToast(err.message || "帳號或密碼發生問題，請再試一次。");
-                } finally {
-                    setAuthLoading(false);
+                });
+            } else {
+                // 本機模擬環境測試
+                if (isCloudSyncEnabled) {
+                    handleUserLogin({
+                        uid: "simulated_user_12345",
+                        displayName: "孕媽咪好運連連"
+                    });
+                } else {
+                    handleUserLogout();
                 }
-            };
+            }
 
-            const handleSignOut = async () => {
-                const { auth, signOut } = window.FirebaseServices;
+            loadCheckupTemplate();
+            renderAll();
+        }
+
+        function refreshTimeInputs() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            const dtStr = now.toISOString().slice(0, 16);
+            document.getElementById('bp-dt').value = dtStr;
+            document.getElementById('glu-dt').value = dtStr;
+            document.getElementById('ex-dt').value = dtStr;
+            document.getElementById('cu-date').value = now.toISOString().split('T')[0];
+        }
+
+        // --- 存檔機制 (雙軌制) ---
+        async function save() {
+            localStorage.setItem('preg_pro_v4_final_final', JSON.stringify(userData));
+            if (currentUser && isCloudSyncEnabled) {
+                await saveCloudData(userData);
+            }
+            renderAll();
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.classList.remove('hidden', 'opacity-0');
+            t.classList.add('opacity-100');
+            setTimeout(() => {
+                t.classList.replace('opacity-100', 'opacity-0');
+                setTimeout(() => t.classList.add('hidden'), 300);
+            }, 2500);
+        }
+
+        // --- 雲端備份儲存與獲取 (RULE 1, 2, 3 遵守) ---
+        async function saveCloudData(data) {
+            if (!currentUser) return;
+            if (isFirebaseReady) {
                 try {
-                    await signOut(auth);
-                    localStorage.removeItem('guest_access_granted');
-                    showToast("已成功登出。您的資料將在本機端安全儲存。");
-                    setView('welcome');
-                } catch (err) {
-                    console.error("登出失敗", err);
-                }
-            };
-
-            const exportTxt = () => {
-                const content = records.sort((a,b) => b.timestamp - a.timestamp).map(r => {
-                    const stickerStr = r.stickers && r.stickers.length > 0 
-                        ? `\n貼圖: ${r.stickers.map(s => s.type === 'emoji' ? s.char : '[自訂相片貼紙]').join(' ')}` 
-                        : '';
-                    return `時間: ${new Date(r.timestamp).toLocaleString()}\n心情: ${r.score} (${r.text})\n日記: ${r.diary || "無日記內容"}${stickerStr}\n---`;
-                }).join('\n\n');
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
-                link.download = "媽咪心情日記.txt"; link.click();
-            };
-
-            // --- 溫柔 Gemini 夥伴 ---
-            const callGemini = async (prompt) => {
-                const apiKey = "";
-                const maxRetries = 5;
-                let delay = 1000;
-
-                for (let i = 0; i < maxRetries; i++) {
-                    try {
-                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts: [{ text: prompt }] }],
-                                systemInstruction: { parts: [{ text: "妳是一位溫柔、有耐心的孕期心理諮詢顧問。請用溫暖的口氣安慰並鼓勵媽咪。字數保持在 150 字以內。" }] }
-                            })
-                        });
-                        if (!response.ok) throw new Error("API 響應錯誤");
-                        const result = await response.json();
-                        return result.candidates?.[0]?.content?.parts?.[0]?.text || "媽咪，我一直在這，慢慢說，我聽著呢。";
-                    } catch (err) {
-                        if (i === maxRetries - 1) throw err;
-                        await new Promise(r => setTimeout(r, delay));
-                        delay *= 2;
-                    }
-                }
-            };
-
-            const sendMessage = async () => {
-                if (!inputMessage.trim()) return;
-                const userMsg = inputMessage;
-                setInputMessage('');
-                setChatMessages(p => [...p, { role: 'user', text: userMsg }]);
-                setIsTyping(true);
-
-                try {
-                    const aiResponse = await callGemini(`目前的媽咪心情分數是 ${moodScore}/100。媽咪說：${userMsg}`);
-                    setChatMessages(p => [...p, { role: 'assistant', text: aiResponse }]);
+                    // RULE 1: Strict paths /artifacts/{appId}/users/{userId}/{collectionName}
+                    const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'data', 'pregnancyState');
+                    await setDoc(docRef, { state: data }, { merge: true });
                 } catch (e) {
-                    setChatMessages(p => [...p, { role: 'assistant', text: '抱歉，我的連線好像有點不穩定，但我一直都在這裡陪妳喔。' }]);
-                } finally {
-                    setIsTyping(false);
+                    console.error("Cloud saving failed", e);
+                    showToast("❌ 雲端同步失敗");
                 }
-            };
+            } else {
+                // 本機模擬雲端
+                localStorage.setItem('simulated_cloud_data', JSON.stringify(data));
+            }
+        }
 
-            const generateCalendarDays = () => {
-                const year = currentMonth.getFullYear();
-                const month = currentMonth.getMonth();
-                const days = [];
-                const total = new Date(year, month + 1, 0).getDate();
-                const start = new Date(year, month, 1).getDay();
-                for (let i = 0; i < start; i++) days.push(null);
-                for (let i = 1; i <= total; i++) days.push(new Date(year, month, i));
-                return days;
-            };
+        // --- Google 帳號管理 ---
+        window.signInGoogle = async () => {
+            isCloudSyncEnabled = true;
+            localStorage.setItem('preg_cloud_sync_enabled', 'true');
 
-            const tutorialSlides = [
-                { title: "歡迎來到妳的避風港 💖", desc: "親愛的媽咪，讓我們陪妳度過這段奇妙的旅程。", icon: "heart" },
-                { title: "心情溫度計 🌡️", desc: "每天滑動溫度計記錄情緒，點選「儲存紀錄」留下足跡。", icon: "thermometer" },
-                { title: "暖心與自訂貼圖 🧸", desc: "日記中可以加入我們精選的實體貼紙效果圖示，甚至可以上傳超音波照片做成雲端專屬貼圖，完全不佔手機空間喔！", icon: "smile" },
-                { title: "今日心情快篩 📝", desc: "首頁上方的卡片可以進行快速自我檢測。", icon: "check" },
-                { title: "日曆回顧與補寫 📅", desc: "點擊日期查看紀錄。若那天沒記，點選後點擊「補寫」即可補填。", icon: "edit" },
-                { title: "雲端帳號備份 ☁️", desc: "您可以註冊或登入個人專屬帳號。登入後，即便更換手機或清除瀏覽器，日記與貼圖也絕不會遺失喔！", icon: "user" }
-            ];
-
-            if (!isInit) return <div className="min-h-screen flex items-center justify-center bg-pink-50 text-pink-500 font-bold">開啟您的溫馨空間...</div>;
-
-            return (
-                <div className="min-h-screen p-4 flex flex-col items-center select-none relative">
-                    
-                    {/* 說明欄 Overlay */}
-                    {showTutorial && (
-                        <div className="tutorial-overlay">
-                            <div className="bg-white w-full max-w-sm rounded-[3rem] shadow-2xl p-10 flex flex-col items-center border-4 border-pink-100 animate-in zoom-in-95">
-                                <div className="mb-6 p-6 bg-pink-50 rounded-full text-pink-500">
-                                    <Icon name={tutorialSlides[tutorialStep].icon} size={48} />
-                                </div>
-                                <h2 className="text-xl font-bold text-pink-600 mb-4">{tutorialSlides[tutorialStep].title}</h2>
-                                <p className="text-slate-500 text-center text-sm mb-10 leading-relaxed">{tutorialSlides[tutorialStep].desc}</p>
-                                <div className="flex flex-col gap-3 w-full">
-                                    <button onClick={() => tutorialStep < tutorialSlides.length - 1 ? setTutorialStep(tutorialStep + 1) : handleCompleteTutorial()} className="w-full bg-pink-500 text-white py-4 rounded-2xl font-bold shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
-                                        {tutorialStep === tutorialSlides.length - 1 ? "開始使用" : "下一步"} <Icon name="right" size={18} />
-                                    </button>
-                                    {tutorialStep > 0 && (
-                                        <button onClick={() => setTutorialStep(tutorialStep - 1)} className="w-full bg-slate-100 text-slate-500 py-3 rounded-2xl font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all">
-                                            <Icon name="left" size={18} /> 上一頁
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* 免登入但書說明彈窗 */}
-                    {showDisclaimerPopup && (
-                        <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[350] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
-                                <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-3 text-amber-500">
-                                    <Icon name="alert" size={24} />
-                                </div>
-                                <h5 className="font-bold text-slate-700 mb-2">本機儲存但書說明</h5>
-                                <p className="text-xs text-slate-500 mb-6 leading-relaxed text-left">
-                                    您目前正在使用「免登入體驗模式」。<br/><br/>
-                                    您的心情溫度日記與超音波照片貼圖將**僅儲存於當前設備的瀏覽器快取**中。如果您清除快取、重設手機、或更換新裝置登入，紀錄將無法找回喔！<br/><br/>
-                                    強烈建議您花費 10 秒免費註冊雲端帳號，即可獲得永久防遺失保障。
-                                </p>
-                                <div className="flex flex-col gap-2">
-                                    <button onClick={() => { setView('account'); setShowDisclaimerPopup(false); }} className="w-full bg-pink-500 text-white py-3 rounded-xl text-xs font-bold shadow-md hover:bg-pink-600 active:scale-95 transition-all">
-                                        立即登入/註冊
-                                    </button>
-                                    <button onClick={() => setShowDisclaimerPopup(false)} className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl text-xs font-bold active:scale-95">
-                                        我知道了，繼續體驗
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Header */}
-                    <header className="w-full max-w-md flex justify-between items-center mb-4">
-                        <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="flex items-center gap-2 text-pink-600 font-bold text-xl">
-                            <Icon name="heart" className="fill-pink-500" /> 媽咪心情空間
-                        </button>
-                        <div className="flex gap-2">
-                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all" title="查看說明"><Icon name="info" size={18}/></button>
-                            <button onClick={() => setView('account')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${user && !user.isAnonymous ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="雲端備份帳號"><Icon name="user" size={18}/></button>
-                            <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all" title="日記日曆"><Icon name="calendar" size={18}/></button>
-                        </div>
-                    </header>
-
-                    <main className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl h-[680px] overflow-hidden flex flex-col relative border-4 border-white">
-                        
-                        {/* 暖心 Toast 提示 */}
-                        {toast && (
-                            <div className="absolute top-4 left-4 right-4 bg-rose-500 text-white px-4 py-3 rounded-2xl text-xs font-bold text-center shadow-lg z-[250] animate-in slide-in-from-top-4 flex items-center justify-center gap-2">
-                                <Icon name="info" size={14} /> {toast}
-                            </div>
-                        )}
-
-                        {/* 自定義貼圖雲端刪除確認彈窗 */}
-                        {stickerToDelete && (
-                            <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
-                                <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
-                                    <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3 text-rose-500">
-                                        <Icon name="trash" size={24} />
-                                    </div>
-                                    <h5 className="font-bold text-slate-700 mb-2">確定刪除貼圖嗎？</h5>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久移除這張自訂手帳貼圖喔！</p>
-                                    <div className="flex gap-3">
-                                        <button onClick={() => setStickerToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
-                                            取消
-                                        </button>
-                                        <button onClick={async () => {
-                                            await handleDeleteCustomSticker(stickerToDelete.id);
-                                            setStickerToDelete(null);
-                                        }} className="flex-1 bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md hover:bg-rose-600 active:scale-95 transition-all">
-                                            刪除
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* 自定義日記歷史刪除確認彈窗 */}
-                        {recordToDelete && (
-                            <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
-                                <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
-                                    <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-3 text-rose-500">
-                                        <Icon name="trash" size={24} />
-                                    </div>
-                                    <h5 className="font-bold text-slate-700 mb-2">確定刪除這筆日記嗎？</h5>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會從雲端永久清除您這天的珍貴心情日記喔！</p>
-                                    <div className="flex gap-3">
-                                        <button onClick={() => setRecordToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
-                                            取消
-                                        </button>
-                                        <button onClick={async () => {
-                                            if (user && window.FirebaseServices) {
-                                                const { db, appId, deleteDoc, doc } = window.FirebaseServices;
-                                                try {
-                                                    const path = doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', recordToDelete.id);
-                                                    await deleteDoc(path);
-                                                    setRecordToDelete(null);
-                                                } catch (err) {
-                                                    console.error("刪除日記失敗", err);
-                                                    showToast("刪除日記失敗，請重試。");
-                                                }
-                                            }
-                                        }} className="flex-1 bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md hover:bg-rose-600 active:scale-95 transition-all">
-                                            刪除
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* VIEW: WELCOME (入口網頁：提供登入備份及免登入直接體驗選項) */}
-                        {view === 'welcome' && (
-                            <div className="p-6 flex flex-col h-full bg-gradient-to-b from-pink-50 to-white justify-between overflow-y-auto custom-scrollbar">
-                                <div className="text-center mt-6 space-y-3">
-                                    <div className="w-20 h-20 bg-pink-100 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner animate-pulse">
-                                        <Icon name="heart" className="fill-pink-500" size={40} />
-                                    </div>
-                                    <h2 className="text-2xl font-black text-pink-600 tracking-tight">媽咪心情溫度計</h2>
-                                    <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">陪妳溫柔記錄孕期的每一份感動，Gemini AI 語音傾聽，伴妳迎接新生命 👶</p>
-                                </div>
-
-                                <div className="space-y-4 my-6">
-                                    {/* 按鈕選項 1: 登入註冊雲端備份 */}
-                                    <button onClick={() => { setAuthMode('login'); setView('account'); }} className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-3xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-                                        <Icon name="user" size={18} /> 登入 / 註冊雲端備份
-                                    </button>
-
-                                    {/* 按鈕選項 2: 免登入直接體驗 */}
-                                    <button onClick={handleGuestAccess} className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-3.5 rounded-3xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
-                                        <Icon name="right" size={18} /> 免登入直接體驗
-                                    </button>
-
-                                    {/* ⚠️ 暖心但書警示卡片 */}
-                                    <div className="bg-amber-50/80 border border-amber-100 rounded-[1.8rem] p-4 text-[11px] text-amber-800 leading-relaxed text-left flex gap-2.5">
-                                        <div className="pt-0.5"><Icon name="alert" size={14} className="text-amber-500 shrink-0" /></div>
-                                        <div>
-                                            <p className="font-extrabold mb-0.5">⚠️ 免登入體驗但書說明：</p>
-                                            <p>免登入狀態下，所有手帳日記與上傳的超音波照片貼圖**僅儲存於此設備的瀏覽器中**。若清除快取、重設裝置、或更換新手機，紀錄將無法找回喔！建議您註冊雲端帳號以獲得永久安全備份。</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <footer className="text-center text-[10px] text-slate-300 font-medium">© 2024 MOMMY'S MOOD HARBOR</footer>
-                            </div>
-                        )}
-
-                        {/* VIEW: HOME */}
-                        {view === 'home' && (
-                            <div className="p-5 flex flex-col h-full space-y-4 overflow-y-auto custom-scrollbar">
-                                
-                                {/* 如果是 Guest 匿名帳號，首頁頂部提示黃色但書徽章 */}
-                                {user && user.isAnonymous && (
-                                    <div onClick={() => setShowDisclaimerPopup(true)} className="bg-amber-50 hover:bg-amber-100 border border-amber-200/60 px-4 py-2 rounded-2xl text-[10px] text-amber-700 font-bold flex items-center justify-between cursor-pointer active:scale-98 transition-all">
-                                        <span className="flex items-center gap-1.5"><Icon name="alert" size={12} className="text-amber-500" /> 本機儲存模式 (紀錄未雲端備份)</span>
-                                        <span className="underline text-amber-900">查看但書說明 ➔</span>
-                                    </div>
-                                )}
-
-                                <div className="bg-gradient-to-r from-pink-500 to-pink-400 p-4 rounded-3xl text-white shadow-lg flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-white/20 rounded-xl"><Icon name="check" size={20} /></div>
-                                        <div><h3 className="font-bold text-sm">今日心情快篩</h3><p className="text-[10px] text-pink-100 uppercase tracking-widest font-bold">Quick Check</p></div>
-                                    </div>
-                                    <button onClick={() => setView('survey')} className="bg-white text-pink-500 text-xs px-4 py-2 rounded-xl font-bold active:scale-95 transition-all">測量</button>
-                                </div>
-
-                                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                                    <div className="flex items-center">
-                                        <div className="flex flex-col items-center">
-                                            <canvas ref={canvasRef} width={60} height={170} />
-                                            <div className="mt-1 text-xl font-black" style={{ color: getMoodColor(moodScore) }}>{moodScore}</div>
-                                        </div>
-                                        <div className="flex-1 ml-6 space-y-3">
-                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">心情溫度計</h3>
-                                            <p className="text-sm font-bold text-slate-700">{getMoodText(moodScore)}</p>
-                                            <input type="range" min="0" max="100" value={moodScore} onChange={(e) => setMoodScore(parseInt(e.target.value))} className="w-full h-2 bg-pink-100 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                                            <p className="text-[10px] text-slate-400 italic">滑動調整此刻的感受...</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="flex-grow flex flex-col">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest"><Icon name="edit" size={14} className="text-pink-400" /> 心情日記</label>
-                                        <button onClick={() => setShowStickerPicker(true)} className="flex items-center gap-1 text-xs text-pink-500 bg-pink-50 hover:bg-pink-100 px-3 py-1.5 rounded-full font-bold transition-all">
-                                            <Icon name="smile" size={14} /> 加上貼圖
-                                        </button>
-                                    </div>
-
-                                    {/* 貼圖背景融入 */}
-                                    <div className="flex-grow flex flex-col relative overflow-hidden bg-slate-50 rounded-3xl p-5 shadow-inner min-h-[160px]">
-                                        
-                                        {/* 裝飾背景貼圖層 */}
-                                        <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
-                                            {selectedStickers.map((s, idx) => {
-                                                const rot = (idx * 15 - 15) + "deg";
-                                                return s.type === 'emoji' ? (
-                                                    <span key={idx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>
-                                                        {s.char}
-                                                    </span>
-                                                ) : (
-                                                    <img key={idx} src={s.char} className="sticker-effect w-24 h-24 object-contain rounded-xl" style={{ transform: `rotate(${rot})` }} />
-                                                );
-                                            })}
-                                        </div>
-
-                                        {/* 貼圖預覽列 */}
-                                        {selectedStickers.length > 0 && (
-                                            <div className="relative z-10 flex gap-2.5 p-1.5 bg-white/60 backdrop-blur-sm rounded-2xl mb-2 items-center flex-wrap w-fit max-w-full">
-                                                {selectedStickers.map((s, idx) => (
-                                                    <div key={idx} className="relative group">
-                                                        {s.type === 'emoji' ? (
-                                                            <span className="sticker-effect inline-block text-4xl select-none">{s.char}</span>
-                                                        ) : (
-                                                            <img src={s.char} className="sticker-effect w-12 h-12 object-contain rounded-lg" />
-                                                        )}
-                                                        <button onClick={() => handleRemoveSelectedSticker(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow hover:bg-red-600 transition-colors">
-                                                            <Icon name="x" size={10} />
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                                <span className="text-[9px] text-pink-500 font-bold ml-1 select-none">({selectedStickers.length}/5)</span>
-                                            </div>
-                                        )}
-
-                                        <textarea 
-                                            value={diaryText} 
-                                            onChange={(e) => setDiaryText(e.target.value)} 
-                                            placeholder="寫下想對寶寶說的話，附上大大的貼紙裝飾這本日記吧..." 
-                                            className="flex-grow bg-transparent text-sm outline-none resize-none placeholder:text-slate-300 leading-relaxed relative z-10 w-full h-full" 
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-3">
-                                    <button onClick={handleSave} className="flex-1 bg-pink-500 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-pink-600 active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="save" size={18} /> 儲存紀錄</button>
-                                    <button onClick={() => setView('chat')} className="bg-indigo-500 text-white p-4 rounded-2xl shadow-lg hover:bg-indigo-600 active:scale-95 transition-all"><Icon name="message" size={24} /></button>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* VIEW: ACCOUNT (雲端同步登入介面) */}
-                        {view === 'account' && (
-                            <div className="p-6 flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="p-2 bg-white rounded-full shadow-sm active:scale-90 transition-all text-slate-300"><Icon name="left"/></button>
-                                    <h3 className="text-lg font-bold">☁️ 雲端帳號備份</h3>
-                                </div>
-
-                                {window.FirebaseServices?.isMock && (
-                                    <div className="bg-amber-50 border border-amber-200 rounded-3xl p-4 mb-4 text-amber-800 text-xs flex gap-2">
-                                        <div className="pt-0.5"><Icon name="info" size={16} /></div>
-                                        <div>
-                                            <p className="font-bold mb-1">GitHub 靜態模擬模式</p>
-                                            <p className="leading-relaxed">目前正執行於靜態預覽，您可在此進行「模擬註冊與登入」來測試本機記憶切換。配對 Firebase 後即會轉為全球安全雲端帳戶備份！</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {user && !user.isAnonymous ? (
-                                    /* 登入後的狀態 */
-                                    <div className="flex-grow flex flex-col justify-between">
-                                        <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm text-center space-y-4">
-                                            <div className="w-16 h-16 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                                                <Icon name="user" size={32} />
-                                            </div>
-                                            <div>
-                                                <span className="bg-pink-100 text-pink-600 text-[10px] font-black uppercase px-2.5 py-1 rounded-full">雲端安全備份中</span>
-                                                <p className="text-slate-700 font-bold text-sm mt-3">{user.email}</p>
-                                            </div>
-                                            <p className="text-xs text-slate-400 leading-relaxed px-2">您的心情日記、自訂超音波貼圖皆已透過高強度密鑰存儲。在任何手機、平板或新瀏覽器登入此帳號，即可毫秒找回您的所有日記回憶！</p>
-                                        </div>
-                                        
-                                        <button onClick={handleSignOut} className="w-full bg-rose-500 hover:bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-2">
-                                            登出帳號
-                                        </button>
-                                    </div>
-                                ) : (
-                                    /* 登入與註冊表單 */
-                                    <form onSubmit={handleAuthSubmit} className="space-y-4">
-                                        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
-                                            <div className="flex border-b border-pink-50 pb-2 text-xs font-bold gap-4 mb-2">
-                                                <button type="button" onClick={() => setAuthMode('login')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'login' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>帳號登入</button>
-                                                <button type="button" onClick={() => setAuthMode('register')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'register' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>免費註冊備份</button>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <div>
-                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">電子郵件 EMAIL</label>
-                                                    <div className="relative">
-                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="mail" size={16} /></div>
-                                                        <input 
-                                                            type="email" 
-                                                            value={authEmail} 
-                                                            onChange={e => setAuthEmail(e.target.value)} 
-                                                            placeholder="mommy@example.com" 
-                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div>
-                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">密碼 PASSWORD (至少6碼)</label>
-                                                    <div className="relative">
-                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="lock" size={16} /></div>
-                                                        <input 
-                                                            type="password" 
-                                                            value={authPassword} 
-                                                            onChange={e => setAuthPassword(e.target.value)} 
-                                                            placeholder="請輸入您的登入密碼" 
-                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <button 
-                                            type="submit" 
-                                            disabled={authLoading}
-                                            className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                                        >
-                                            {authLoading ? (
-                                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                            ) : (
-                                                authMode === 'login' ? '登入雲端帳號' : '註冊個人雲端手帳'
-                                            )}
-                                        </button>
-                                        <p className="text-[10px] text-slate-400 text-center leading-relaxed">建立雲端帳號可將所有手帳紀錄安全存儲。更換任何設備登入時，資料將能全球光速同步！</p>
-                                    </form>
-                                )}
-                            </div>
-                        )}
-
-                        {/* VIEW: HISTORY */}
-                        {view === 'history' && (
-                            <div className="p-6 flex flex-col h-full bg-white relative">
-                                <div className="flex items-center justify-between mb-4">
-                                    <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90 text-slate-400"><Icon name="left"/></button>
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))} className="text-slate-300"><Icon name="left" size={16}/></button>
-                                        <span className="font-bold text-sm text-slate-600">{currentMonth.getFullYear()}年 {currentMonth.getMonth()+1}月</span>
-                                        <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="text-slate-300"><Icon name="right" size={16}/></button>
-                                    </div>
-                                    <button onClick={exportTxt} className="p-2 text-pink-400 hover:bg-pink-50 rounded-full active:scale-90 transition-all"><Icon name="download" size={20} /></button>
-                                </div>
-                                <div className="grid grid-cols-7 gap-1 border-b pb-4 mb-4">
-                                    {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d} className="text-center text-[10px] text-slate-300 font-bold py-2">{d}</div>)}
-                                    {(() => {
-                                        const year = currentMonth.getFullYear(); const month = currentMonth.getMonth();
-                                        const total = new Date(year, month + 1, 0).getDate(); const start = new Date(year, month, 1).getDay();
-                                        const days = [];
-                                        for (let i = 0; i < start; i++) days.push(null);
-                                        for (let i = 1; i <= total; i++) days.push(new Date(year, month, i));
-                                        return days.map((d, i) => {
-                                            if (!d) return <div key={i} className="h-9" />;
-                                            const dayRecords = records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === d.toDateString());
-                                            const isSelected = selectedDate.toDateString() === d.toDateString();
-                                            return (
-                                                <button key={i} onClick={() => setSelectedDate(d)} className={`h-9 rounded-xl flex items-center justify-center relative transition-all ${isSelected ? 'bg-pink-500 text-white shadow-md font-bold' : 'hover:bg-pink-50 text-slate-400'}`}>
-                                                    <span className="text-xs">{d.getDate()}</span>
-                                                    {dayRecords.length > 0 && <div className={`w-1 h-1 rounded-full absolute bottom-1 ${isSelected ? 'bg-white' : 'bg-pink-400'}`} />}
-                                                </button>
-                                            );
-                                        });
-                                    })()}
-                                </div>
-                                <div className="flex-grow overflow-y-auto space-y-3 custom-scrollbar">
-                                    <div className="flex justify-between items-center px-1">
-                                        <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{selectedDate.toLocaleDateString()} 紀錄</h4>
-                                        {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 && (
-                                            <button onClick={() => setView('home')} className="text-[10px] text-pink-400 font-bold flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg active:scale-90"><Icon name="plus" size={12}/> 補寫日記</button>
-                                        )}
-                                    </div>
-                                    {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 ? (
-                                        <div className="text-center py-10 flex flex-col items-center gap-2 border-2 border-dashed border-slate-50 rounded-[2rem] m-2">
-                                            <Icon name="edit" size={24} className="text-slate-100" />
-                                            <p className="text-slate-200 text-[10px]">這天還沒有心情足跡喔</p>
-                                        </div>
-                                    ) : (
-                                        records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).map(r => (
-                                            <div key={r.id} className="p-5 bg-slate-50 rounded-3xl border border-slate-100 group transition-all hover:shadow-md relative overflow-hidden min-h-[130px]">
-                                                
-                                                {/* 貼圖背景融入 */}
-                                                <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
-                                                    {r.stickers && r.stickers.map((stk, sidx) => {
-                                                        const rot = (sidx * 15 - 15) + "deg";
-                                                        return stk.type === 'emoji' ? (
-                                                            <span key={sidx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>
-                                                                {stk.char}
-                                                            </span>
-                                                        ) : (
-                                                            <img key={sidx} src={stk.char} className="sticker-effect w-24 h-24 object-contain rounded-xl" style={{ transform: `rotate(${rot})` }} />
-                                                        );
-                                                    })}
-                                                </div>
-
-                                                <div className="relative z-10">
-                                                    <div className="flex justify-between items-start mb-2">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-[10px] shadow-sm" style={{ backgroundColor: getMoodColor(r.score) }}>{r.score}</div>
-                                                            <p className="text-[10px] font-bold text-slate-600">{r.text}</p>
-                                                        </div>
-                                                        <div className="flex gap-1">
-                                                            <button onClick={() => { setEditingRecord({...r}); setSelectedStickers(r.stickers || []); }} className="p-2 text-slate-300 hover:text-pink-500 active:scale-90"><Icon name="edit" size={14} /></button>
-                                                            <button onClick={() => setRecordToDelete(r)} className="p-2 text-slate-300 hover:text-red-500 active:scale-90"><Icon name="trash" size={14} /></button>
-                                                        </div>
-                                                    </div>
-                                                    {r.diary && <p className="text-xs text-slate-600 leading-relaxed pt-2 border-t border-slate-200/50 font-medium">{r.diary}</p>}
-                                                </div>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* SURVEY */}
-                        {view === 'survey' && (
-                            <div className="p-6 flex flex-col h-full bg-slate-50">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <button onClick={() => setView('home')} className="p-2 bg-white rounded-full shadow-sm active:scale-90 transition-all text-slate-300"><Icon name="left"/></button>
-                                    <h3 className="text-lg font-bold">📝 快速評估</h3>
-                                </div>
-                                <div className="space-y-4">
-                                    <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                        <p className="font-bold text-sm mb-2 text-slate-700">【關於情緒】💓</p>
-                                        <p className="text-xs text-slate-400 mb-6 leading-relaxed">過去一個月，妳是否常覺得情緒低落、憂鬱，或對未來感到沒有希望？</p>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => setSurveyResults(p => ({...p, q1: 'yes'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q1 === 'yes' ? 'bg-pink-500 border-pink-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400'}`}>是</button>
-                                            <button onClick={() => setSurveyResults(p => ({...p, q1: 'no'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q1 === 'no' ? 'bg-pink-500 border-pink-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400'}`}>否</button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                        <p className="font-bold text-sm mb-2 text-slate-700">【關於動力】💪</p>
-                                        <p className="text-xs text-slate-400 mb-6 leading-relaxed">過去一個月，妳是否常對原本喜歡的事物失去興趣，或覺得做什麼都提不起勁？</p>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => setSurveyResults(p => ({...p, q2: 'yes'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q2 === 'yes' ? 'bg-pink-500 border-pink-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400'}`}>是</button>
-                                            <button onClick={() => setSurveyResults(p => ({...p, q2: 'no'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q2 === 'no' ? 'bg-pink-500 border-pink-500 text-white shadow-md' : 'bg-white border-slate-100 text-slate-400'}`}>否</button>
-                                        </div>
-                                    </div>
-
-                                    {surveyResults.q1 && surveyResults.q2 && !showSurveyResult && (
-                                        <button onClick={() => setShowSurveyResult(true)} className="w-full bg-pink-500 text-white py-4 rounded-3xl font-bold shadow-lg animate-in zoom-in-95 active:scale-95 transition-all">送出評估</button>
-                                    )}
-                                    {showSurveyResult && (
-                                        <div className="p-6 rounded-[2.5rem] bg-indigo-50 border-2 border-indigo-100 text-center animate-in slide-in-from-bottom">
-                                            <Icon name="sparkles" className="mx-auto text-indigo-400 mb-2" />
-                                            <p className="text-sm text-indigo-900 font-bold mb-4">
-                                                {surveyResults.q1 === 'yes' || surveyResults.q2 === 'yes' 
-                                                    ? '分析完成！媽咪最近有些壓力，建議找伴侶聊聊，或找 Gemini 說說話喔。' 
-                                                    : '分析完成！看起來狀態挺不錯的，請繼續保持愉快穩定的心情。'}
-                                            </p>
-                                            <button onClick={() => setView('chat')} className="w-full bg-indigo-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md active:scale-95 transition-all">找 Gemini 聊天領取建議</button>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {view === 'chat' && (
-                            <div className="flex flex-col h-full bg-slate-50">
-                                <div className="p-4 border-b bg-indigo-50 flex items-center gap-3">
-                                    <button onClick={() => setView('home')} className="p-2 bg-white rounded-full active:scale-90 transition-all text-indigo-300"><Icon name="left"/></button>
-                                    <h3 className="font-bold text-indigo-700 text-sm tracking-tight">Gemini 溫柔夥伴</h3>
-                                </div>
-                                <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                                    {chatMessages.map((m, i) => (
-                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[85%] p-4 rounded-[1.8rem] text-xs leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-white text-slate-600 rounded-tl-none border border-indigo-50'}`}>{m.text}</div>
-                                        </div>
-                                    ))}
-                                    {isTyping && <div className="text-[10px] text-indigo-400 italic px-4 animate-pulse">Gemini 正在打字中...</div>}
-                                </div>
-                                <div className="p-4 bg-white border-t flex gap-2">
-                                    <input type="text" value={inputMessage} onChange={e => setInputMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="跟 Gemini 說說話吧..." className="flex-1 bg-slate-50 rounded-2xl px-5 py-3 text-xs outline-none focus:ring-2 focus:ring-indigo-100" />
-                                    <button onClick={sendMessage} className="bg-indigo-500 text-white p-3 rounded-2xl shadow-md active:scale-95 transition-all"><Icon name="send" size={18} /></button>
-                                </div>
-                            </div>
-                        )}
-
-                        {editingRecord && (
-                            <div className="absolute inset-0 bg-white z-[150] flex flex-col p-6 animate-in slide-in-from-bottom duration-300">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h3 className="font-bold flex items-center gap-2"><Icon name="edit" size={18} /> 修改紀錄</h3>
-                                    <button onClick={() => { setEditingRecord(null); setSelectedStickers([]); }} className="p-2 hover:bg-slate-100 rounded-full active:scale-90 transition-all text-slate-400"><Icon name="x" size={20}/></button>
-                                </div>
-                                <div className="flex items-center gap-4 mb-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-inner">
-                                    <canvas ref={canvasRef} width={60} height={170} />
-                                    <div className="flex-1 space-y-4">
-                                        <p className="text-xs font-bold" style={{ color: getMoodColor(editingRecord.score) }}>{getMoodText(editingRecord.score)} ({editingRecord.score})</p>
-                                        <input type="range" min="0" max="100" value={editingRecord.score} onChange={e => setEditingRecord({...editingRecord, score: parseInt(e.target.value)})} className="w-full h-2 bg-pink-100 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                                    </div>
-                                </div>
-
-                                <div className="mb-4">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <span className="text-xs font-bold text-slate-400">管理貼圖</span>
-                                        <button onClick={() => setShowStickerPicker(true)} className="flex items-center gap-1 text-xs text-pink-500 bg-pink-50 px-2 py-1 rounded-full font-bold">
-                                            <Icon name="smile" size={12} /> 新增/變更
-                                        </button>
-                                    </div>
-                                    {selectedStickers.length > 0 && (
-                                        <div className="flex gap-2 p-2 bg-pink-50/50 rounded-xl items-center flex-wrap">
-                                            {selectedStickers.map((s, idx) => (
-                                                <div key={idx} className="relative group">
-                                                    {s.type === 'emoji' ? (
-                                                        <span className="sticker-effect inline-block text-2xl select-none">{s.char}</span>
-                                                    ) : (
-                                                        <img src={s.char} className="sticker-effect w-8 h-8 object-contain rounded-md" />
-                                                    )}
-                                                    <button onClick={() => handleRemoveSelectedSticker(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow">
-                                                        <Icon name="x" size={8} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <textarea value={editingRecord.diary} onChange={e => setEditingRecord({...editingRecord, diary: e.target.value})} className="flex-grow bg-slate-50 rounded-3xl p-5 text-sm outline-none resize-none mb-6 border border-slate-100 shadow-inner" />
-                                <button onClick={() => { 
-                                    if (user && window.FirebaseServices) {
-                                        const { db, appId, updateDoc, doc } = window.FirebaseServices;
-                                        updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'mood_history', editingRecord.id), { 
-                                            score: editingRecord.score, 
-                                            text: getMoodText(editingRecord.score), 
-                                            diary: editingRecord.diary,
-                                            stickers: selectedStickers
-                                        }).then(() => {
-                                            setEditingRecord(null); 
-                                            setSelectedStickers([]);
-                                        }).catch(err => {
-                                            console.error("更新日記失敗", err);
-                                            showToast("更新日記失敗，請重試。");
-                                        });
-                                    }
-                                }} className="w-full bg-pink-500 text-white py-4 rounded-2xl font-bold shadow-xl flex items-center justify-center gap-2 active:scale-95">
-                                    <Icon name="save" size={18}/> 儲存更新
-                                </button>
-                            </div>
-                        )}
-
-                        {/* STICKER PICKER MODAL */}
-                        {showStickerPicker && (
-                            <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-2xl border-t border-pink-100 p-6 z-[200] animate-in slide-in-from-bottom duration-300 max-h-[360px] flex flex-col">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h4 className="font-bold text-pink-600 flex items-center gap-2">🧸 選擇貼圖</h4>
-                                    <button onClick={() => setShowStickerPicker(false)} className="p-2 hover:bg-slate-100 rounded-full">
-                                        <Icon name="x" size={18} className="text-slate-400" />
-                                    </button>
-                                </div>
-
-                                <div className="flex border-b border-pink-50 mb-4 text-xs font-bold">
-                                    <button onClick={() => setActiveStickerTab('builtin')} className={`flex-1 pb-3 text-center transition-all ${activeStickerTab === 'builtin' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>
-                                        內建暖心貼圖
-                                    </button>
-                                    <button onClick={() => setActiveStickerTab('custom')} className={`flex-1 pb-3 text-center transition-all ${activeStickerTab === 'custom' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>
-                                        雲端自訂貼圖 ({customStickers.length})
-                                    </button>
-                                </div>
-
-                                <div className="flex-grow overflow-y-auto custom-scrollbar pb-4">
-                                    {activeStickerTab === 'builtin' && (
-                                        <div className="grid grid-cols-5 gap-4 justify-items-center">
-                                            {BUILTIN_STICKERS.map((stk) => (
-                                                <button key={stk.id} onClick={() => handleAddSticker(stk)} className="text-4xl sticker-effect select-none p-1 focus:outline-none animate-in zoom-in-50">
-                                                    {stk.char}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-
-                                    {activeStickerTab === 'custom' && (
-                                        <div className="grid grid-cols-4 gap-4 justify-items-center items-center">
-                                            <button onClick={() => fileInputRef.current.click()} className="w-16 h-16 rounded-2xl border-2 border-dashed border-pink-200 hover:border-pink-400 text-pink-400 flex items-center justify-center transition-colors active:scale-95" title="上傳照片做成貼圖">
-                                                <Icon name="plus" size={28} />
-                                            </button>
-                                            <input type="file" ref={fileInputRef} onChange={handleCustomStickerUpload} accept="image/*" className="hidden" />
-
-                                            {customStickers.map((stk) => (
-                                                <div key={stk.id} className="relative group w-16 h-16 animate-in fade-in zoom-in-75">
-                                                    <img 
-                                                        src={stk.char} 
-                                                        onClick={() => handleAddSticker(stk)}
-                                                        className="w-full h-full object-contain rounded-xl border border-slate-100 sticker-effect cursor-pointer" 
-                                                    />
-                                                    <button 
-                                                        onClick={(e) => { 
-                                                            e.stopPropagation();
-                                                            e.preventDefault();
-                                                            setStickerToDelete(stk); 
-                                                        }} 
-                                                        className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full shadow-md transition-all active:scale-75 z-[210] w-5 h-5 flex items-center justify-center"
-                                                        title="自雲端永久刪除貼圖"
-                                                    >
-                                                        <Icon name="x" size={10} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-                    </main>
-                    
-                    <footer className="mt-4 text-[9px] text-slate-300 font-bold uppercase tracking-[0.2em] px-4 text-center">© 2024 MOMMY'S MOOD HARBOR ・ 給媽咪最溫柔的記憶足跡</footer>
-                </div>
-            );
+            if (isFirebaseReady) {
+                try {
+                    // RULE 3: Auth First
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    const provider = new GoogleAuthProvider();
+                    const result = await signInWithPopup(auth, provider);
+                    handleUserLogin(result.user);
+                } catch (e) {
+                    console.error(e);
+                    showToast("❌ Google 登入失敗");
+                    handleUserLogout();
+                }
+            } else {
+                // 模擬模式
+                showToast("💡 進入本機模擬雲端登入狀態！");
+                handleUserLogin({
+                    uid: "simulated_user_12345",
+                    displayName: "幸孕媽咪"
+                });
+            }
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        window.signOutGoogle = async () => {
+            isCloudSyncEnabled = false;
+            localStorage.setItem('preg_cloud_sync_enabled', 'false');
+            if (isFirebaseReady) {
+                await signOut(auth);
+            }
+            handleUserLogout();
+            showToast("已登出 Google，返回免登入狀態");
+        };
+
+        async function handleUserLogin(user) {
+            currentUser = user;
+            document.getElementById('local-warning-box').classList.add('hidden');
+            document.getElementById('cloud-username').innerText = user.displayName || "幸孕媽咪";
+            document.getElementById('cloud-status-box').classList.remove('hidden');
+
+            let cloudData = null;
+            if (isFirebaseReady) {
+                try {
+                    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'pregnancyState');
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        cloudData = docSnap.data().state;
+                    }
+                } catch (e) {
+                    console.error("Cloud fetch failed", e);
+                }
+            } else {
+                const simSaved = localStorage.getItem('simulated_cloud_data');
+                if (simSaved) cloudData = JSON.parse(simSaved);
+            }
+
+            const localData = { ...userData };
+            const hasLocal = localData.profile || localData.weights.length > 0 || Object.keys(localData.checkups).length > 0 || localData.bp.length > 0 || localData.glu.length > 0 || localData.exercise.length > 0;
+
+            if (cloudData) {
+                if (hasLocal) {
+                    // 有雲端資料也有本地資料，跳出衝突處理
+                    window.tempCloudData = cloudData;
+                    document.getElementById('syncConflictModal').classList.remove('hidden');
+                } else {
+                    // 只有雲端有資料，直接下載
+                    userData = cloudData;
+                    save();
+                    showToast("🎉 已成功下載並同步您的雲端紀錄！");
+                }
+            } else {
+                // 雲端無資料，直接把本地資料上傳備份
+                if (hasLocal) {
+                    await saveCloudData(localData);
+                    showToast("🎉 已將您先前的本地資料上傳雲端存檔！");
+                } else {
+                    showToast("雲端同步已啟用，將會隨時備份新紀錄");
+                }
+            }
+        }
+
+        function handleUserLogout() {
+            currentUser = null;
+            isCloudSyncEnabled = false;
+            localStorage.setItem('preg_cloud_sync_enabled', 'false');
+            document.getElementById('cloud-status-box').classList.add('hidden');
+            document.getElementById('local-warning-box').classList.remove('hidden');
+            // 回復為本機存儲數據
+            const saved = localStorage.getItem('preg_pro_v4_final_final');
+            userData = saved ? JSON.parse(saved) : { profile: null, weights: [], checkups: {}, bp: [], glu: [], exercise: [] };
+            renderAll();
+        }
+
+        // 處理同步選擇
+        window.handleSyncChoice = async (choice) => {
+            document.getElementById('syncConflictModal').classList.add('hidden');
+            if (choice === 'cloud') {
+                userData = window.tempCloudData;
+                save();
+                showToast("已載入雲端備份，覆蓋本機");
+            } else if (choice === 'local') {
+                await saveCloudData(userData);
+                showToast("已成功將本地資料覆蓋至雲端");
+            } else if (choice === 'merge') {
+                userData = mergeData(userData, window.tempCloudData);
+                save();
+                showToast("🎉 資料合併成功並已同步雲端！");
+            } else {
+                signOutGoogle();
+            }
+            window.tempCloudData = null;
+        };
+
+        // 資料合併算法 (防止重複與資料丟失)
+        function mergeData(local, cloud) {
+            const merged = {
+                profile: local.profile || cloud.profile,
+                weights: [],
+                checkups: { ...cloud.checkups, ...local.checkups },
+                bp: [],
+                glu: [],
+                exercise: []
+            };
+
+            // 體重合併
+            const wMap = new Map();
+            [...(cloud.weights || []), ...(local.weights || [])].forEach(w => {
+                const exist = wMap.get(w.week);
+                if (!exist || w.id > exist.id) wMap.set(w.week, w);
+            });
+            merged.weights = Array.from(wMap.values()).sort((a,b) => a.week - b.week);
+
+            // 血壓/血糖/運動合併 (以唯一時間戳/時間為 Key)
+            const bpMap = new Map();
+            [...(cloud.bp || []), ...(local.bp || [])].forEach(b => bpMap.set(b.id || b.date, b));
+            merged.bp = Array.from(bpMap.values()).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            const gluMap = new Map();
+            [...(cloud.glu || []), ...(local.glu || [])].forEach(g => gluMap.set(g.id || g.date, g));
+            merged.glu = Array.from(gluMap.values()).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            const exMap = new Map();
+            [...(cloud.exercise || []), ...(local.exercise || [])].forEach(e => exMap.set(e.id || e.date, e));
+            merged.exercise = Array.from(exMap.values()).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+            return merged;
+        }
+
+        // --- 體重警示邏輯 (v4.5 邏輯維持) ---
+        function getWeightStatus(record) {
+            const p = userData.profile;
+            if(!p) return [];
+            const alerts = [];
+            const totalDiff = record.val - p.w;
+
+            if(record.week <= 12) {
+                if(totalDiff < 0) {
+                    alerts.push({ type: 'info', msg: "💡 提醒：懷孕前期因賀爾蒙變化，產生噁心嘔吐，體重沒有變化甚至減輕是正常的現象。" });
+                } else if(totalDiff > 2) {
+                    alerts.push({ type: 'danger', msg: "⚠️ 體重增重過快！前12週總增重建議在2公斤內。" });
+                }
+            } else {
+                const prevRecords = userData.weights.filter(w => w.week < record.week).sort((a,b) => b.week - a.week);
+                if(prevRecords.length > 0) {
+                    const prev = prevRecords[0];
+                    const weeklySpeed = (record.val - prev.val) / (record.week - prev.week);
+                    let limit = 0.5;
+                    if(p.bmi >= 25.0 && p.bmi <= 29.9) limit = 0.3;
+                    if(p.bmi >= 30.0) limit = 0.25;
+
+                    if(weeklySpeed > limit + 0.05) {
+                        alerts.push({ type: 'danger', msg: `⚠️ 體重增重過快！目前每週增加 ${weeklySpeed.toFixed(2)}kg (建議速限: ${limit}kg)。` });
+                    }
+                }
+            }
+            return alerts;
+        }
+
+        // --- 輸入/新增邏輯 ---
+        window.saveProfile = () => {
+            const h = parseFloat(document.getElementById('h').value) / 100;
+            const w = parseFloat(document.getElementById('w').value);
+            if(!h || !w) return showToast("請輸入身高體重");
+            const bmi = (w / (h * h)).toFixed(1);
+            let target = bmi < 18.5 ? "12.5~18 kg" : bmi < 25 ? "11.5~16 kg" : bmi < 30 ? "7~11.5 kg" : "5~9 kg";
+            userData.profile = { h, w, bmi: parseFloat(bmi), cat: bmi < 18.5 ? "過輕" : bmi < 25 ? "正常" : "過重", target };
+            save(); showToast("孕前資料已設定");
+        };
+
+        window.addWeight = () => {
+            const week = parseInt(document.getElementById('weight-week').value);
+            const val = parseFloat(document.getElementById('now-w').value);
+            if(isNaN(week) || isNaN(val)) return showToast("請填寫週數與體重");
+            if(!userData.profile) return showToast("請先設定孕前資料");
+            userData.weights.push({ id: Date.now(), week, val, date: new Date().toLocaleDateString() });
+            userData.weights.sort((a,b) => a.week - b.week);
+            save(); document.getElementById('now-w').value = ''; showToast("體重已紀錄");
+        };
+
+        window.addBP = () => {
+            const sys = parseInt(document.getElementById('bp-sys').value);
+            const dia = parseInt(document.getElementById('bp-dia').value);
+            const dt = document.getElementById('bp-dt').value.replace('T', ' ');
+            if(!sys || !dia) return showToast("請輸入完整數值");
+            
+            // 如果時間相同就覆蓋
+            userData.bp = userData.bp.filter(x => x.date !== dt);
+            userData.bp.unshift({ id: Date.now(), sys, dia, date: dt, type: document.getElementById('bp-type').value });
+            save(); showToast("血壓已存檔");
+        };
+
+        window.addGlu = () => {
+            const val = parseInt(document.getElementById('glu-val').value);
+            const dt = document.getElementById('glu-dt').value.replace('T', ' ');
+            if(!val) return showToast("請輸入血糖值");
+
+            userData.glu = userData.glu.filter(x => x.date !== dt);
+            userData.glu.unshift({ id: Date.now(), val, date: dt, type: document.getElementById('glu-type').value });
+            save(); showToast("血糖已存檔");
+        };
+
+        window.addExercise = () => {
+            const name = document.getElementById('ex-name').value.trim();
+            const duration = parseInt(document.getElementById('ex-duration').value);
+            const dt = document.getElementById('ex-dt').value.replace('T', ' ');
+            if(!name || !duration) return showToast("請輸入完整運動內容");
+
+            userData.exercise = userData.exercise.filter(x => x.date !== dt);
+            userData.exercise.unshift({ id: Date.now(), name, duration, date: dt });
+            save(); 
+            document.getElementById('ex-name').value = ''; 
+            document.getElementById('ex-duration').value = '';
+            document.getElementById('encourage-msg').innerText = encourageMsgs[Math.floor(Math.random() * encourageMsgs.length)];
+            document.getElementById('encourageModal').classList.remove('hidden');
+        };
+
+        window.closeEncourage = () => { document.getElementById('encourageModal').classList.add('hidden'); };
+
+        window.saveCheckup = () => {
+            const id = document.getElementById('cu-index').value;
+            userData.checkups[id] = {
+                timesName: checkupTemplates.find(t => t.id == id).name,
+                date: document.getElementById('cu-date').value,
+                week: document.getElementById('cu-week').value,
+                weight: document.getElementById('cu-weight').value,
+                bp: document.getElementById('cu-bp').value,
+                fhr: document.getElementById('cu-fhr').value,
+                sugar: document.getElementById('cu-sugar').value,
+                protein: document.getElementById('cu-protein').value,
+                edema: document.getElementById('cu-edema').value,
+                next: document.getElementById('cu-next').value
+            };
+            save(); showToast("產檢存檔完成");
+        };
+
+        // --- 修正回填邏輯 ---
+        window.editRecord = (cat, id) => {
+            let item;
+            if(cat === 'bp') item = userData.bp.find(x => x.id === id);
+            else if(cat === 'glu') item = userData.glu.find(x => x.id === id);
+            else if(cat === 'ex') item = userData.exercise.find(x => x.id === id);
+            if(!item) return;
+            if(cat === 'bp') {
+                document.getElementById('bp-dt').value = item.date.replace(' ', 'T');
+                document.getElementById('bp-sys').value = item.sys; document.getElementById('bp-dia').value = item.dia;
+                document.getElementById('bp-type').value = item.type;
+                showPage('health');
+            } else if(cat === 'glu') {
+                document.getElementById('glu-dt').value = item.date.replace(' ', 'T');
+                document.getElementById('glu-val').value = item.val; document.getElementById('glu-type').value = item.type;
+                showPage('health');
+            } else if(cat === 'ex') {
+                document.getElementById('ex-dt').value = item.date.replace(' ', 'T');
+                document.getElementById('ex-name').value = item.name; document.getElementById('ex-duration').value = item.duration;
+                showPage('exercise');
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast("💡 資料已帶回上方，修正完再儲存即可覆盖時間相同的紀錄。");
+        };
+
+        // --- 刪除機制 (與 Modal 綁定) ---
+        window.triggerDelete = (type, id) => { pendingAction = { type, id }; document.getElementById('confirmModal').classList.remove('hidden'); };
+        window.closeModal = () => { document.getElementById('confirmModal').classList.add('hidden'); };
+        window.executeDelete = () => {
+            const { type, id } = pendingAction;
+            if(type === 'weight') userData.weights = userData.weights.filter(x => x.id !== id);
+            else if(type === 'bp') userData.bp = userData.bp.filter(x => x.id !== id);
+            else if(type === 'glu') userData.glu = userData.glu.filter(x => x.id !== id);
+            else if(type === 'exercise') userData.exercise = userData.exercise.filter(x => x.id !== id);
+            else if(type === 'checkup') delete userData.checkups[id];
+            else if(type === 'CLEAR_ALL') { localStorage.clear(); location.reload(); return; }
+            closeModal(); save(); showToast("紀錄已刪除");
+        };
+
+        window.triggerClearAll = () => { pendingAction = { type: 'CLEAR_ALL', id: null }; document.getElementById('confirmModal').classList.remove('hidden'); };
+
+        // --- 備份管理 ---
+        window.exportBackup = () => {
+            const dataStr = JSON.stringify(userData);
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `幸孕備份檔_${new Date().toLocaleDateString()}.json`;
+            a.click();
+            showToast("備份檔下載完成，可上傳至您的 Google Drive/LINE 保管");
+        };
+
+        window.importBackup = (input) => {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (imported.weights !== undefined) {
+                        userData = imported;
+                        save();
+                        showToast("🎉 資料還原成功！");
+                    } else { throw new Error(); }
+                } catch (err) {
+                    showToast("❌ 格式不支援，請確認是否為本系統導出的備份檔");
+                }
+            };
+            reader.readAsText(file);
+            input.value = "";
+        };
+
+        // --- 畫面渲染 ---
+        function renderAll() {
+            if(userData.profile) {
+                document.getElementById('bmi-result').classList.remove('hidden');
+                document.getElementById('bmi-result').innerHTML = `孕前 BMI: <b>${userData.profile.bmi}</b> (${userData.profile.cat})<br>建議增重目標: <span class="text-pink-600 font-bold">${userData.profile.target}</span>`;
+            }
+
+            // 體重列表
+            document.getElementById('weight-list').innerHTML = [...userData.weights].reverse().map(x => {
+                const alerts = getWeightStatus(x);
+                const alertHtml = alerts.map(a => `<div class="${a.type==='danger'?'text-red-500':'text-blue-500'} alert-text">${a.msg}</div>`).join('');
+                return `
+                <div class="p-3 border rounded-lg bg-white shadow-sm mb-2 text-xs">
+                    <div class="flex justify-between items-center">
+                        <div>W<b>${x.week}</b>: <strong class="text-pink-600 text-sm">${x.val} kg</strong><br><span class="text-gray-400 font-normal">${x.date}</span></div>
+                        <button onclick="triggerDelete('weight', ${x.id})" class="delete-btn">刪除</button>
+                    </div>
+                    ${alertHtml}
+                </div>`}).join('');
+
+            // 產檢歷史
+            const cuHistory = Object.keys(userData.checkups).map(k => ({ ...userData.checkups[k], k }));
+            document.getElementById('checkup-history').innerHTML = cuHistory.sort((a,b) => b.k - a.k).map(x => `
+                <div class="card p-4 text-xs border-l-4 border-pink-400">
+                    <div class="flex justify-between font-bold mb-2">
+                        <span>${x.timesName} (W${x.week})</span>
+                        <button onclick="triggerDelete('checkup', ${x.k})" class="delete-btn">刪除</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-y-1.5 text-gray-500 border-t pt-2 mt-1">
+                        <div>日期: <span class="text-gray-700">${x.date}</span></div>
+                        <div>體重: <span class="text-gray-700">${x.weight} kg</span></div>
+                        <div>血壓: <span class="text-gray-700">${x.bp}</span></div>
+                        <div>胎心音: <span class="text-gray-700">${x.fhr}</span></div>
+                        <div>尿糖: <span class="font-bold ${x.sugar==='+'?'text-amber-600':''}">${x.sugar}</span></div>
+                        <div>蛋白: <span class="font-bold ${x.protein!=='-'?'text-amber-600':''}">${x.protein}</span></div>
+                    </div>
+                    ${x.next ? `<div class="mt-2 text-amber-600 font-bold border-t pt-1.5">下次預約: ${x.next}</div>` : ''}
+                </div>`).join('') || '<div class="text-center text-gray-300 py-10 text-xs font-bold">目前無產檢紀錄</div>';
+
+            // 血壓列表
+            const bpMap = { morning: '晨起', night: '睡前', anytime: '一般' };
+            document.getElementById('bp-list').innerHTML = userData.bp.map(x => {
+                const sys = parseInt(x.sys), dia = parseInt(x.dia);
+                const isHigh = sys >= 140 || dia >= 90;
+                const isLow = sys < 90 || dia < 60;
+                return `<div class="p-3 border rounded bg-white text-xs flex justify-between items-center shadow-sm mb-2">
+                    <div><b>${x.sys}/${x.dia}</b> <span class="text-[9px]">mmHg</span> 
+                    <span class="${isHigh?'text-red-500 font-bold':isLow?'text-blue-500 font-bold':'text-green-500'}">${isHigh?'⚠️偏高':isLow?'⚠️偏低':'正常'}</span> (${bpMap[x.type] || '一般'})<br>
+                    <span onclick="editRecord('bp', ${x.id})" class="time-link text-gray-400">${x.date}</span></div>
+                    <button onclick="triggerDelete('bp', ${x.id})" class="delete-btn">刪除</button>
+                </div>`}).join('');
+
+            // 血糖列表
+            const gluMap = { fasting: '空腹', after2h: '飯後2h', other: '其他' };
+            document.getElementById('glu-list').innerHTML = userData.glu.map(x => {
+                const limit = x.type === 'fasting' ? 95 : 120;
+                const isHigh = x.val >= limit;
+                const isLow = x.val < 60;
+                return `<div class="p-3 border rounded bg-white text-xs flex justify-between items-center shadow-sm mb-2">
+                    <div><b>${x.val}</b> <span class="text-[9px]">mg/dL</span> 
+                    <span class="${isHigh?'text-red-500 font-bold':isLow?'text-blue-500 font-bold':'text-green-500'}">${isHigh?'⚠️偏高':isLow?'⚠️偏低':'正常'}</span> (${gluMap[x.type] || '其他'})<br>
+                    <span onclick="editRecord('glu', ${x.id})" class="time-link text-gray-400">${x.date}</span></div>
+                    <button onclick="triggerDelete('glu', ${x.id})" class="delete-btn">刪除</button>
+                </div>`}).join('');
+
+            // 運動列表
+            document.getElementById('exercise-list').innerHTML = userData.exercise.map(x => `
+                <div class="p-3 border rounded bg-white text-xs flex justify-between items-center shadow-sm mb-2">
+                    <div><span class="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-[9px] font-bold mr-1">${x.name}</span><b>${x.duration}</b> 分鐘<br>
+                    <span onclick="editRecord('ex', ${x.id})" class="time-link text-gray-400">${x.date}</span></div>
+                    <button onclick="triggerDelete('exercise', ${x.id})" class="delete-btn">刪除</button>
+                </div>`).join('') || '<div class="text-center text-gray-300 py-10 text-xs italic">尚未紀錄任何好孕動動</div>';
+            
+            updateChart();
+        }
+
+        window.showPage = (p) => {
+            ['bmi', 'checkup', 'health', 'exercise', 'data'].forEach(x => {
+                document.getElementById('page-'+x).classList.add('hidden');
+                document.getElementById('btn-'+x).className = 'flex-1 py-3 text-gray-400';
+            });
+            document.getElementById('page-'+p).classList.remove('hidden');
+            document.getElementById('btn-'+p).className = 'flex-1 py-3 tab-active';
+            if(p === 'bmi') setTimeout(updateChart, 50);
+        }
+
+        function updateChart() {
+            const ctx = document.getElementById('weightChart');
+            if(!ctx) return;
+            if(chart) chart.destroy();
+            const data = [...userData.weights].sort((a,b) => a.week - b.week);
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(x => 'W'+x.week),
+                    datasets: [{ label: '體重', data: data.map(x => x.val), borderColor: '#f472b6', tension: 0.3, fill: false, pointRadius: 4 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+        }
+
+        window.loadCheckupTemplate = () => {
+            const id = document.getElementById('cu-index').value;
+            const t = checkupTemplates.find(x => x.id == id);
+            const data = userData.checkups[id] || {};
+            document.getElementById('cu-week').value = data.week || (t.week || "");
+            document.getElementById('cu-date').value = data.date || new Date().toISOString().split('T')[0];
+            document.getElementById('cu-weight').value = data.weight || "";
+            document.getElementById('cu-bp').value = data.bp || "";
+            document.getElementById('cu-fhr').value = data.fhr || "";
+            document.getElementById('cu-sugar').value = data.sugar || "-";
+            document.getElementById('cu-protein').value = data.protein || "-";
+            document.getElementById('cu-edema').value = data.edema || "-";
+            document.getElementById('cu-next').value = data.next || "";
+        }
+
+        window.exportCSV = () => {
+            let csv = "\ufeff日期,項目,詳情,數值\n";
+            userData.weights.forEach(x => csv += `${x.date},體重紀錄,第${x.week}週,${x.val}kg\n`);
+            userData.bp.forEach(x => csv += `${x.date},血壓紀錄,${bpMap[x.type] || '一般'},${x.sys}/${x.dia} mmHg\n`);
+            userData.glu.forEach(x => csv += `${x.date},血糖紀錄,${gluMap[x.type] || '其他'},${x.val} mg/dL\n`);
+            userData.exercise.forEach(x => csv += `${x.date},運動紀錄,${x.name},${x.duration} 分鐘\n`);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `幸孕檔案夾紀錄_${new Date().toLocaleDateString()}.csv`; a.click();
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>
