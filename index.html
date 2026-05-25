@@ -11,10 +11,10 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Firebase SDKs with Account-auth Hybrid Loader -->
+    <!-- Firebase SDKs with Google Auth Hybrid Loader -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, signInWithPopup, GoogleAuthProvider, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         let firebaseConfig = null;
@@ -32,10 +32,11 @@
             const app = initializeApp(firebaseConfig);
             const auth = getAuth(app);
             const db = getFirestore(app);
+            const googleProvider = new GoogleAuthProvider();
 
             window.FirebaseServices = { 
                 auth, db, appId, signInAnonymously, onAuthStateChanged, signInWithCustomToken, 
-                createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+                signInWithGoogle: () => signInWithPopup(auth, googleProvider), signOut,
                 collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDoc, query,
                 isMock: false
             };
@@ -45,7 +46,7 @@
             setupLocalServices();
         }
 
-        // 本地模擬帳號與儲存服務 (供 GitHub Pages 完美運行測試)
+        // 本地模擬 Google 帳號與儲存服務 (供 GitHub Pages 完美運行與測試一鍵連動)
         function setupLocalServices() {
             window.localListeners = window.localListeners || {};
             window.authCallbacks = window.authCallbacks || [];
@@ -76,28 +77,18 @@
                     const guest = { uid: 'guest-mom-user', isAnonymous: true };
                     return { user: guest };
                 },
-                createUserWithEmailAndPassword: async (auth, email, password) => {
-                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
-                    if (users.find(u => u.email === email)) {
-                        throw { code: 'auth/email-already-in-use', message: '此 Email 已經被註冊囉！' };
-                    }
-                    const newUser = { uid: 'local_u_' + Date.now(), email: email, isAnonymous: false };
-                    users.push({ ...newUser, password });
-                    localStorage.setItem('local_mock_users', JSON.stringify(users));
-                    localStorage.setItem('local_current_user', JSON.stringify(newUser));
-                    window.triggerLocalAuthState(newUser);
-                    return { user: newUser };
-                },
-                signInWithEmailAndPassword: async (auth, email, password) => {
-                    const users = JSON.parse(localStorage.getItem('local_mock_users') || '[]');
-                    const found = users.find(u => u.email === email && u.password === password);
-                    if (!found) {
-                        throw { code: 'auth/wrong-password', message: '帳號或密碼輸入錯誤，請再試一次。' };
-                    }
-                    const currUser = { uid: found.uid, email: found.email, isAnonymous: false };
-                    localStorage.setItem('local_current_user', JSON.stringify(currUser));
-                    window.triggerLocalAuthState(currUser);
-                    return { user: currUser };
+                // 虛擬 Google 登入一鍵模擬
+                signInWithGoogle: async (emailVal = 'mommy@gmail.com') => {
+                    const mockUser = { 
+                        uid: 'mock_g_user_' + emailVal.replace(/[^a-zA-Z0-9]/g, ''), 
+                        email: emailVal, 
+                        displayName: '孕媽咪寶貝',
+                        photoURL: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=100',
+                        isAnonymous: false 
+                    };
+                    localStorage.setItem('local_current_user', JSON.stringify(mockUser));
+                    window.triggerLocalAuthState(mockUser);
+                    return { user: mockUser };
                 },
                 signOut: async () => {
                     localStorage.removeItem('local_current_user');
@@ -105,7 +96,6 @@
                 },
                 onAuthStateChanged: (auth, callback) => {
                     window.authCallbacks.push(callback);
-                    // 延遲發送當前狀態，確保 React 準備好
                     setTimeout(() => callback(currentSession), 100);
                     return () => {
                         window.authCallbacks = window.authCallbacks.filter(cb => cb !== callback);
@@ -218,6 +208,15 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // --- 溫度計數值對照字串與顏色 (標準 Function 宣告移至最頂端以確保 Hoisting 正常) ---
+        function getMoodColor(s) {
+            return s < 30 ? '#60a5fa' : s < 60 ? '#34d399' : s < 85 ? '#fbbf24' : '#f87171';
+        }
+        
+        function getMoodText(s) {
+            return s < 30 ? '平靜微憂' : s < 60 ? '愉快穩定' : s < 85 ? '焦慮上升' : '情緒緊繃';
+        }
+
         // --- 穩定版 SVG 圖示組件 ---
         const Icon = ({ name, size = 24, className = "" }) => {
             const icons = {
@@ -317,6 +316,14 @@
                         <line x1="12" y1="9" x2="12" y2="13" />
                         <line x1="12" y1="17" x2="12.01" y2="17" />
                     </React.Fragment>
+                ),
+                google: (
+                    <React.Fragment>
+                        <path fill="#EA4335" d="M12 5.04c1.67 0 3.17.58 4.35 1.71l3.25-3.25C17.65 1.74 14.99 1 12 1 7.35 1 3.39 3.65 1.5 7.5l3.85 3C6.24 7.51 8.89 5.04 12 5.04z" />
+                        <path fill="#4285F4" d="M23 12.25c0-.82-.07-1.61-.21-2.38H12v4.51h6.18c-.27 1.41-1.07 2.61-2.27 3.41l3.52 2.73C21.49 18.33 23 15.54 23 12.25z" />
+                        <path fill="#FBBC05" d="M5.35 10.5a6.991 6.991 0 0 1 0-3l-3.85-3C.56 6.37 0 9.13 0 12s.56 5.63 1.5 7.5l3.85-3c-.63-.91-1-2.01-1-3.5z" />
+                        <path fill="#34A853" d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.52-2.73c-1.1.74-2.5 1.18-4.44 1.18-3.11 0-5.76-2.47-6.65-5.46l-3.85 3C3.39 20.35 7.35 23 12 23z" />
+                    </React.Fragment>
                 )
             };
             return (
@@ -326,33 +333,20 @@
             );
         };
 
-        // --- 內建貼圖列表 ---
-        const BUILTIN_STICKERS = [
-            { id: "s_baby", char: "👶", type: "emoji" },
-            { id: "s_bottle", char: "🍼", type: "emoji" },
-            { id: "s_pregnant", char: "🤰", type: "emoji" },
-            { id: "s_teddy", char: "🧸", type: "emoji" },
-            { id: "s_feet", char: "👣", type: "emoji" },
-            { id: "s_heart", char: "💖", type: "emoji" },
-            { id: "s_coffee", char: "☕", type: "emoji" },
-            { id: "s_star", char: "⭐", type: "emoji" },
-            { id: "s_clover", char: "🍀", type: "emoji" },
-            { id: "s_sun", char: "☀️", type: "emoji" },
-            { id: "s_smile", char: "😊", type: "emoji" },
-            { id: "s_cry", char: "😭", type: "emoji" },
-            { id: "s_tired", char: "😴", type: "emoji" },
-            { id: "s_love", char: "🥰", type: "emoji" },
-            { id: "s_party", char: "🥳", type: "emoji" }
+        // --- 內建及自訂導覽說明頁面資料 (重新補回並放置最頂層防 TDZ) ---
+        const tutorialSlides = [
+            { title: "歡迎來到妳的避風港 💖", desc: "親愛的媽咪，讓我們陪妳度過這段奇妙的旅程。", icon: "heart" },
+            { title: "心情溫度計 🌡️", desc: "每天滑動溫度計記錄情緒，點選「儲存紀錄」留下足跡。", icon: "thermometer" },
+            { title: "暖心與自訂貼圖 🧸", desc: "日記中可以加入我們精選的實體貼紙效果圖示，甚至可以上傳超音波照片做成雲端專屬貼圖，完全不佔手機空間喔！", icon: "smile" },
+            { title: "今日心情快篩 📝", desc: "首頁上方的卡片可以進行快速自我檢測。", icon: "check" },
+            { title: "日曆回顧與補寫 📅", desc: "點擊日期查看紀錄。若那天沒記，點選後點擊「補寫」即可補填。", icon: "edit" },
+            { title: "Google 一鍵雲端備份 ☁️", desc: "媽咪只要點擊一鍵連動 Google 登入，心情回憶永不遺失！", icon: "google" }
         ];
-
-        // --- 溫度計數值對照字串與顏色 ---
-        const getMoodColor = (s) => s < 30 ? '#60a5fa' : s < 60 ? '#34d399' : s < 85 ? '#fbbf24' : '#f87171';
-        const getMoodText = (s) => s < 30 ? '平靜微憂' : s < 60 ? '愉快穩定' : s < 85 ? '焦慮上升' : '情緒緊繃';
 
         const App = () => {
             const [isInit, setIsInit] = useState(false);
             const [user, setUser] = useState(null);
-            const [view, setView] = useState('welcome'); // 預設進入 welcome 登入/註冊入口
+            const [view, setView] = useState('welcome'); // 預設進入 welcome 登入入口
             const [moodScore, setMoodScore] = useState(50);
             const [diaryText, setDiaryText] = useState('');
             
@@ -362,11 +356,8 @@
             const [showStickerPicker, setShowStickerPicker] = useState(false);
             const [activeStickerTab, setActiveStickerTab] = useState('builtin');
 
-            // 帳號認證欄位
-            const [authEmail, setAuthEmail] = useState('');
-            const [authPassword, setAuthPassword] = useState('');
-            const [authMode, setAuthMode] = useState('login'); // login, register
-            const [authLoading, setAuthLoading] = useState(false);
+            // 虛擬 Google 登入模擬器
+            const [showMockGoogleSelector, setShowMockGoogleSelector] = useState(false);
 
             // 內建安全提示與但書宣告彈窗
             const [toast, setToast] = useState('');
@@ -397,7 +388,7 @@
                 setTimeout(() => setToast(''), 3000);
             };
 
-            // --- 解決 temporal dead zone 的點擊關閉說明處理 ---
+            // --- 點擊關閉說明處理 ---
             const handleCompleteTutorial = async () => {
                 if (!user || !window.FirebaseServices) {
                     setShowTutorial(false);
@@ -432,128 +423,6 @@
                     showToast("儲存失敗，請重試");
                 }
             };
-
-            // --- Firebase / LocalStorage 啟動辨識 ---
-            useEffect(() => {
-                const checkReady = () => {
-                    if (window.FirebaseServices) {
-                        setIsInit(true);
-                        return true;
-                    }
-                    return false;
-                };
-                if (!checkReady()) window.addEventListener('firebase-ready', checkReady);
-                return () => window.removeEventListener('firebase-ready', checkReady);
-            }, []);
-
-            // --- 身分驗證與安全載入 (Rule 3: Auth Before Queries) ---
-            useEffect(() => {
-                if (!isInit) return;
-                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.FirebaseServices;
-
-                const initAuth = async () => {
-                    try {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (e) { 
-                        console.error("Auth Error", e); 
-                    }
-                };
-                initAuth();
-
-                const unsubscribe = onAuthStateChanged(auth, (u) => {
-                    setUser(u);
-                });
-                return () => unsubscribe();
-            }, [isInit]);
-
-            // --- 偏好與導覽初始化 ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, getDoc, doc } = window.FirebaseServices;
-
-                const checkPrefsAndRedirect = async () => {
-                    try {
-                        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs');
-                        const snap = await getDoc(prefRef);
-                        
-                        if (user.isAnonymous) {
-                            const localGuestSeen = localStorage.getItem('guest_access_granted');
-                            if (localGuestSeen === 'true') {
-                                setView('home');
-                            }
-                        } else {
-                            setView('home');
-                        }
-
-                        if (!snap.exists() || !snap.data().tutorialSeen) {
-                            setShowTutorial(true);
-                        }
-                    } catch (e) {
-                        console.error("載入偏好失敗:", e);
-                    }
-                };
-
-                checkPrefsAndRedirect();
-            }, [user, isInit]);
-
-            // --- 歷史日記雲端同步 (已修復！依據 Rule 1 將 '{userId}' 修正為 user.uid ) ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
-                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history');
-                const unsub = onSnapshot(q, (snap) => {
-                    setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-                }, (err) => {
-                    console.error("同步心情紀錄失敗:", err);
-                });
-                return () => unsub();
-            }, [user, isInit]);
-
-            // --- 自訂貼圖雲端同步 (已修復！依據 Rule 1 將 '{userId}' 修正為 user.uid ) ---
-            useEffect(() => {
-                if (!user || !isInit) return;
-                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
-                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers');
-                
-                const unsubscribe = onSnapshot(q, (snap) => {
-                    const loadedStickers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setCustomStickers(loadedStickers.sort((a, b) => b.timestamp - a.timestamp));
-                }, (err) => {
-                    console.error("載入自訂貼圖失敗", err);
-                });
-
-                return () => unsubscribe();
-            }, [user, isInit]);
-
-            // --- 溫度計繪製 ---
-            useEffect(() => {
-                const canvas = canvasRef.current;
-                if (!canvas) return;
-                const ctx = canvas.getContext('2d');
-                const score = editingRecord ? editingRecord.score : moodScore;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                const color = getMoodColor(score);
-                
-                ctx.beginPath();
-                ctx.arc(30, 135, 24, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-
-                ctx.beginPath();
-                ctx.moveTo(20, 135); ctx.lineTo(20, 25);
-                ctx.arc(30, 25, 10, Math.PI, 0);
-                ctx.lineTo(40, 135);
-                ctx.fillStyle = '#f8fafc'; ctx.fill(); ctx.stroke();
-
-                const fillH = (110) * (score / 100);
-                ctx.fillStyle = color;
-                ctx.fillRect(23, 130 - fillH, 14, fillH);
-            }, [moodScore, view, editingRecord, isInit]);
 
             // --- 貼圖操作邏輯 ---
             const handleAddSticker = (sticker) => {
@@ -621,7 +490,6 @@
                 if (user && isInit) {
                     const { db, appId, deleteDoc, doc } = window.FirebaseServices;
                     try {
-                        // 修正自訂貼圖刪除路徑
                         await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers', id));
                         setSelectedStickers(prev => prev.filter(s => s.id !== id));
                     } catch (err) {
@@ -645,38 +513,30 @@
                 showToast("🌸 已進入免登入體驗模式！紀錄僅存於本機。");
             };
 
-            // --- 註冊與登入邏輯 ---
-            const handleAuthSubmit = async (e) => {
-                e.preventDefault();
-                if (!authEmail.trim() || !authPassword.trim()) {
-                    showToast("請輸入完整的 Email 與密碼喔！");
-                    return;
-                }
-                if (authPassword.length < 6) {
-                    showToast("密碼必須大於或等於 6 個字元。");
-                    return;
-                }
-
-                setAuthLoading(true);
-                const { auth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = window.FirebaseServices;
-
+            // --- 一鍵 Google 登入連動 ---
+            const handleGoogleLogin = async (simulatedEmail = '') => {
+                if (!isInit) return;
+                const services = window.FirebaseServices;
+                
                 try {
-                    if (authMode === 'register') {
-                        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
-                        showToast("🎉 註冊成功，已開啟專屬雲端帳號！");
+                    if (services.isMock) {
+                        // 在 GitHub Pages 或 Mock 環境：展示精美的 Google 虛擬帳號選擇器
+                        if (!simulatedEmail) {
+                            setShowMockGoogleSelector(true);
+                            return;
+                        }
+                        await services.signInWithGoogle(simulatedEmail);
+                        setShowMockGoogleSelector(false);
                     } else {
-                        await signInWithEmailAndPassword(auth, authEmail, authPassword);
-                        showToast("🔑 登入成功，已同步您的手帳日記！");
+                        // 正式 Firebase 雲端環境下
+                        await services.signInWithGoogle();
                     }
                     localStorage.setItem('guest_access_granted', 'false');
-                    setAuthEmail('');
-                    setAuthPassword('');
                     setView('home');
+                    showToast("☁️ 已成功一鍵連動 Google，日記與貼圖已備份至雲端！");
                 } catch (err) {
-                    console.error("認證錯誤", err);
-                    showToast(err.message || "帳號或密碼發生問題，請再試一次。");
-                } finally {
-                    setAuthLoading(false);
+                    console.error("Google Auth 失敗", err);
+                    showToast("Google 連動登入失敗，請重試。");
                 }
             };
 
@@ -759,14 +619,129 @@
                 return days;
             };
 
-            const tutorialSlides = [
-                { title: "歡迎來到妳的避風港 💖", desc: "親愛的媽咪，讓我們陪妳度過這段奇妙的旅程。", icon: "heart" },
-                { title: "心情溫度計 🌡️", desc: "每天滑動溫度計記錄情緒，點選「儲存紀錄」留下足跡。", icon: "thermometer" },
-                { title: "暖心與自訂貼圖 🧸", desc: "日記中可以加入我們精選的實體貼紙效果圖示，甚至可以上傳超音波照片做成雲端專屬貼圖，完全不佔手機空間喔！", icon: "smile" },
-                { title: "今日心情快篩 📝", desc: "首頁上方的卡片可以進行快速自我檢測。", icon: "check" },
-                { title: "日曆回顧與補寫 📅", desc: "點擊日期查看紀錄。若那天沒記，點選後點擊「補寫」即可補填。", icon: "edit" },
-                { title: "雲端帳號備份 ☁️", desc: "您可以註冊或登入個人專屬帳號。登入後，即便更換手機或清除瀏覽器，日記與貼圖也絕不會遺失喔！", icon: "user" }
-            ];
+            // --- Firebase / LocalStorage 啟動辨識 ---
+            useEffect(() => {
+                const checkReady = () => {
+                    if (window.FirebaseServices) {
+                        setIsInit(true);
+                        return true;
+                    }
+                    return false;
+                };
+                if (!checkReady()) window.addEventListener('firebase-ready', checkReady);
+                return () => window.removeEventListener('firebase-ready', checkReady);
+            }, []);
+
+            // --- 身分驗證與安全載入 (Rule 3: Auth Before Queries) ---
+            useEffect(() => {
+                if (!isInit) return;
+                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = window.FirebaseServices;
+
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (e) { 
+                        console.error("Auth Error", e); 
+                    }
+                };
+                initAuth();
+
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                });
+                return () => unsubscribe();
+            }, [isInit]);
+
+            // --- 偏好與導覽初始化 ---
+            useEffect(() => {
+                if (!user || !isInit) return;
+                const { db, appId, getDoc, doc } = window.FirebaseServices;
+
+                const checkPrefsAndRedirect = async () => {
+                    try {
+                        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'prefs');
+                        const snap = await getDoc(prefRef);
+                        
+                        if (user.isAnonymous) {
+                            const localGuestSeen = localStorage.getItem('guest_access_granted');
+                            if (localGuestSeen === 'true') {
+                                setView('home');
+                            }
+                        } else {
+                            setView('home');
+                        }
+
+                        if (!snap.exists() || !snap.data().tutorialSeen) {
+                            setShowTutorial(true);
+                        }
+                    } catch (e) {
+                        console.error("載入偏好失敗:", e);
+                    }
+                };
+
+                checkPrefsAndRedirect();
+            }, [user, isInit]);
+
+            // --- 歷史日記雲端同步 ---
+            useEffect(() => {
+                if (!user || !isInit) return;
+                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
+                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'mood_history');
+                const unsub = onSnapshot(q, (snap) => {
+                    setRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                }, (err) => {
+                    console.error("同步心情紀錄失敗:", err);
+                });
+                return () => unsub();
+            }, [user, isInit]);
+
+            // --- 自訂貼圖雲端同步 ---
+            useEffect(() => {
+                if (!user || !isInit) return;
+                const { db, appId, collection, onSnapshot } = window.FirebaseServices;
+                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'custom_stickers');
+                
+                const unsubscribe = onSnapshot(q, (snap) => {
+                    const loadedStickers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setCustomStickers(loadedStickers.sort((a, b) => b.timestamp - a.timestamp));
+                }, (err) => {
+                    console.error("載入自訂貼圖失敗", err);
+                });
+
+                return () => unsubscribe();
+            }, [user, isInit]);
+
+            // --- 溫度計繪製 ---
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const score = editingRecord ? editingRecord.score : moodScore;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                const color = getMoodColor(score);
+                
+                ctx.beginPath();
+                ctx.arc(30, 135, 24, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(20, 135); ctx.lineTo(20, 25);
+                ctx.arc(30, 25, 10, Math.PI, 0);
+                ctx.lineTo(40, 135);
+                ctx.fillStyle = '#f8fafc'; ctx.fill(); ctx.stroke();
+
+                const fillH = (110) * (score / 100);
+                ctx.fillStyle = color;
+                ctx.fillRect(23, 130 - fillH, 14, fillH);
+            }, [moodScore, view, editingRecord, isInit]);
+
+            if (!isInit) return <div className="min-h-screen flex items-center justify-center bg-pink-50 text-pink-500 font-bold">開啟您的溫馨空間...</div>;
 
             return (
                 <div className="min-h-screen p-4 flex flex-col items-center select-none relative">
@@ -794,6 +769,40 @@
                         </div>
                     )}
 
+                    {/* 模擬環境專屬：逼真 Google 授權帳號選擇器 (解決靜態網址測試痛點) */}
+                    {showMockGoogleSelector && (
+                        <div className="absolute inset-0 bg-pink-950/40 backdrop-blur-md z-[500] flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl border-4 border-pink-100 animate-in zoom-in-95 text-left">
+                                <div className="flex items-center gap-2 mb-6 pb-4 border-b border-pink-50">
+                                    <Icon name="google" size={24} />
+                                    <span className="font-bold text-slate-600 text-sm">連動 Google 帳號授權</span>
+                                </div>
+                                <h4 className="font-bold text-slate-700 text-sm mb-4">請選擇您要登入的 Google 帳戶</h4>
+                                <div className="space-y-3">
+                                    {[
+                                        { name: '美麗孕媽咪 (主力備份帳號)', email: 'mommy.beautiful@gmail.com' },
+                                        { name: '幸福媽咪 (副帳號紀錄)', email: 'mommy.happy@gmail.com' }
+                                    ].map((acc, aidx) => (
+                                        <button 
+                                            key={aidx} 
+                                            onClick={() => handleGoogleLogin(acc.email)}
+                                            className="w-full p-4 bg-slate-50 hover:bg-pink-50 rounded-2xl border border-slate-100 flex items-center gap-3 text-left transition-colors active:scale-98"
+                                        >
+                                            <div className="w-8 h-8 rounded-full bg-pink-100 text-pink-500 flex items-center justify-center font-bold text-xs select-none">M</div>
+                                            <div>
+                                                <p className="font-bold text-slate-700 text-xs">{acc.name}</p>
+                                                <p className="text-[10px] text-slate-400">{acc.email}</p>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <button onClick={() => setShowMockGoogleSelector(false)} className="w-full mt-6 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95">
+                                    取消授權
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* 免登入但書說明彈窗 */}
                     {showDisclaimerPopup && (
                         <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[350] flex items-center justify-center p-4">
@@ -805,11 +814,11 @@
                                 <p className="text-xs text-slate-500 mb-6 leading-relaxed text-left">
                                     您目前正在使用「免登入體驗模式」。<br/><br/>
                                     您的心情溫度日記與超音波照片貼圖將**僅儲存於當前設備的瀏覽器快取**中。如果您清除快取、重設手機、或更換新裝置登入，紀錄將無法找回喔！<br/><br/>
-                                    強烈建議您花費 10 秒免費註冊雲端帳號，即可獲得永久防遺失保障。
+                                    強烈建議您一鍵連動 Google 雲端帳號，即可獲得永久防遺失保障。
                                 </p>
                                 <div className="flex flex-col gap-2">
                                     <button onClick={() => { setView('account'); setShowDisclaimerPopup(false); }} className="w-full bg-pink-500 text-white py-3 rounded-xl text-xs font-bold shadow-md hover:bg-pink-600 active:scale-95 transition-all">
-                                        立即登入/註冊
+                                        一鍵 Google 登入
                                     </button>
                                     <button onClick={() => setShowDisclaimerPopup(false)} className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl text-xs font-bold active:scale-95">
                                         我知道了，繼續體驗
@@ -826,7 +835,7 @@
                         </button>
                         <div className="flex gap-2">
                             <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all" title="查看說明"><Icon name="info" size={18}/></button>
-                            <button onClick={() => setView('account')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${user && !user.isAnonymous ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="雲端備份帳號"><Icon name="user" size={18}/></button>
+                            <button onClick={() => setView('account')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${user && !user.isAnonymous ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="一鍵 Google 備份帳號"><Icon name="user" size={18}/></button>
                             <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all" title="日記日曆"><Icon name="calendar" size={18}/></button>
                         </div>
                     </header>
@@ -872,7 +881,7 @@
                                         <Icon name="trash" size={24} />
                                     </div>
                                     <h5 className="font-bold text-slate-700 mb-2">確定刪除這筆日記嗎？</h5>
-                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久清除您這天的心情日記喔！</p>
+                                    <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會從雲端永久清除您這天的心情日記喔！</p>
                                     <div className="flex gap-3">
                                         <button onClick={() => setRecordToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
                                             取消
@@ -897,7 +906,7 @@
                             </div>
                         )}
 
-                        {/* VIEW: WELCOME (入口網頁) */}
+                        {/* VIEW: WELCOME (入口網頁：提供一鍵 Google 連動登入與免登入直接體驗) */}
                         {view === 'welcome' && (
                             <div className="p-6 flex flex-col h-full bg-gradient-to-b from-pink-50 to-white justify-between overflow-y-auto custom-scrollbar">
                                 <div className="text-center mt-6 space-y-3">
@@ -909,13 +918,13 @@
                                 </div>
 
                                 <div className="space-y-4 my-6">
-                                    {/* 按鈕選項 1: 登入註冊雲端備份 */}
-                                    <button onClick={() => { setAuthMode('login'); setView('account'); }} className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-3xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
-                                        <Icon name="user" size={18} /> 登入 / 註冊雲端備份
+                                    {/* 貼圖：G一鍵連動 Google 登入 */}
+                                    <button onClick={() => handleGoogleLogin()} className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-4 rounded-3xl font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-3">
+                                        <Icon name="google" size={20} /> 一鍵 Google 帳號登入
                                     </button>
 
                                     {/* 按鈕選項 2: 免登入直接體驗 */}
-                                    <button onClick={handleGuestAccess} className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-3.5 rounded-3xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2">
+                                    <button onClick={handleGuestAccess} className="w-full bg-pink-500 hover:bg-pink-600 text-white py-3.5 rounded-3xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">
                                         <Icon name="right" size={18} /> 免登入直接體驗
                                     </button>
 
@@ -924,7 +933,7 @@
                                         <div className="pt-0.5"><Icon name="alert" size={14} className="text-amber-500 shrink-0" /></div>
                                         <div>
                                             <p className="font-extrabold mb-0.5">⚠️ 免登入體驗但書說明：</p>
-                                            <p>免登入狀態下，所有手帳日記與上傳的超音波照片貼圖**僅儲存於此設備的瀏覽器中**。若清除快取、重設裝置、或更換新手機，紀錄將無法找回喔！建議您註冊雲端帳號以獲得永久安全備份。</p>
+                                            <p>免登入狀態下，所有手帳日記與上傳的超音波照片貼圖**僅儲存於此設備的瀏覽器中**。若清除快取、重設裝置、或更換新手機，紀錄將無法找回喔！建議您連動 Google 帳號以獲得永久安全備份。</p>
                                         </div>
                                     </div>
                                 </div>
@@ -1028,7 +1037,7 @@
                             </div>
                         )}
 
-                        {/* VIEW: ACCOUNT */}
+                        {/* VIEW: ACCOUNT (Google 備份登入與狀態介面) */}
                         {view === 'account' && (
                             <div className="p-6 flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar">
                                 <div className="flex items-center gap-2 mb-6">
@@ -1041,7 +1050,7 @@
                                         <div className="pt-0.5"><Icon name="info" size={16} /></div>
                                         <div>
                                             <p className="font-bold mb-1">GitHub 靜態模擬模式</p>
-                                            <p className="leading-relaxed">目前正執行於靜態預覽，您可在此進行「模擬註冊與登入」來測試本機記憶切換。配對 Firebase 後即會轉為全球安全雲端帳戶備份！</p>
+                                            <p className="leading-relaxed">目前正執行於靜態預覽，您可在此進行「模擬 Google 一鍵授權登入」來測試本機記憶切換。配對 Firebase 後即會轉為全球安全雲端帳戶備份！</p>
                                         </div>
                                     </div>
                                 )}
@@ -1050,80 +1059,52 @@
                                     /* 登入後的狀態 */
                                     <div className="flex-grow flex flex-col justify-between">
                                         <div className="bg-white rounded-3xl p-6 border border-pink-100 shadow-sm text-center space-y-4">
-                                            <div className="w-16 h-16 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                                                <Icon name="user" size={32} />
+                                            <div className="w-16 h-16 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner overflow-hidden">
+                                                {user.photoURL ? (
+                                                    <img src={user.photoURL} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <Icon name="user" size={32} />
+                                                )}
                                             </div>
                                             <div>
-                                                <span className="bg-pink-100 text-pink-600 text-[10px] font-black uppercase px-2.5 py-1 rounded-full">雲端安全備份中</span>
+                                                <span className="bg-pink-100 text-pink-600 text-[10px] font-black uppercase px-2.5 py-1 rounded-full">Google 雲端安全備份中</span>
                                                 <p className="text-slate-700 font-bold text-sm mt-3">{user.email}</p>
+                                                {user.displayName && <p className="text-xs text-slate-400 mt-1">您好，{user.displayName} 媽咪</p>}
                                             </div>
-                                            <p className="text-xs text-slate-400 leading-relaxed px-2">您的心情日記、自訂超音波貼圖皆已透過高強度密鑰存儲。在任何手機、平板或新瀏覽器登入此帳號，即可毫秒找回您的所有日記回憶！</p>
+                                            <p className="text-xs text-slate-400 leading-relaxed px-2">您的心情日記、自訂超音波貼圖皆已透過 Google 安全金鑰備份。在任何手機、平板或新瀏覽器登入此帳號，即可毫秒找回您的所有日記回憶！</p>
                                         </div>
                                         
                                         <button onClick={handleSignOut} className="w-full bg-rose-500 hover:bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-2">
-                                            登出帳號
+                                            登出 Google 帳號
                                         </button>
                                     </div>
                                 ) : (
-                                    /* 登入與註冊表單 */
-                                    <form onSubmit={handleAuthSubmit} className="space-y-4">
-                                        <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm space-y-4">
-                                            <div className="flex border-b border-pink-50 pb-2 text-xs font-bold gap-4 mb-2">
-                                                <button type="button" onClick={() => setAuthMode('login')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'login' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>帳號登入</button>
-                                                <button type="button" onClick={() => setAuthMode('register')} className={`flex-1 text-center pb-2 transition-all ${authMode === 'register' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>免費註冊備份</button>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <div>
-                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">電子郵件 EMAIL</label>
-                                                    <div className="relative">
-                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="mail" size={16} /></div>
-                                                        <input 
-                                                            type="email" 
-                                                            value={authEmail} 
-                                                            onChange={e => setAuthEmail(e.target.value)} 
-                                                            placeholder="mommy@example.com" 
-                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div>
-                                                    <label className="text-[10px] font-black text-slate-400 tracking-wider block mb-1">密碼 PASSWORD (至少6碼)</label>
-                                                    <div className="relative">
-                                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-300"><Icon name="lock" size={16} /></div>
-                                                        <input 
-                                                            type="password" 
-                                                            value={authPassword} 
-                                                            onChange={e => setAuthPassword(e.target.value)} 
-                                                            placeholder="請輸入您的登入密碼" 
-                                                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-3 pl-10 pr-4 text-xs outline-none focus:border-pink-300 focus:ring-2 focus:ring-pink-50"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
+                                    /* Google 登入表單（一鍵直接連動） */
+                                    <div className="space-y-6 my-auto text-center">
+                                        <div className="w-16 h-16 bg-pink-50 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                                            <Icon name="user" size={32} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <h4 className="font-extrabold text-slate-700 text-base">安全快速，一鍵同步</h4>
+                                            <p className="text-xs text-slate-400 leading-relaxed px-6">連動 Google 帳號，幫您安全儲存所有的心情日記與超音波貼圖，換手機或清除快取也能永久保存！</p>
                                         </div>
 
                                         <button 
-                                            type="submit" 
-                                            disabled={authLoading}
-                                            className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                                            onClick={() => handleGoogleLogin()}
+                                            className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-4 rounded-3xl font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-3"
                                         >
-                                            {authLoading ? (
-                                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                            ) : (
-                                                authMode === 'login' ? '登入雲端帳號' : '註冊個人雲端手帳'
-                                            )}
+                                            <Icon name="google" size={20} /> 一鍵 Google 帳號登入
                                         </button>
-                                        <p className="text-xs text-slate-400 text-center leading-relaxed">建立雲端帳號可將所有手帳紀錄安全存儲。更換任何設備登入時，資料將能全球光速同步！</p>
-                                    </form>
+
+                                        <p className="text-[10px] text-slate-300">我們尊重您的隱私，絕不收集、洩漏您的 Google 個人敏感資訊。</p>
+                                    </div>
                                 )}
                             </div>
                         )}
 
                         {/* VIEW: HISTORY */}
                         {view === 'history' && (
-                            <div className="p-6 flex flex-col h-full bg-white relative">
+                            <div className="p-6 flex flex-col h-full bg-white relative text-slate-700">
                                 <div className="flex items-center justify-between mb-4">
                                     <button onClick={() => setView(user && !user.isAnonymous ? 'home' : 'welcome')} className="p-2 hover:bg-slate-100 rounded-full transition-all active:scale-90 text-slate-400"><Icon name="left"/></button>
                                     <div className="flex items-center gap-4">
