@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>媽咪心情溫度計 - 溫馨陪伴空間</title>
+    <title>媽咪心情手帳 - 溫馨陪伴空間</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & ReactDOM -->
@@ -13,11 +13,31 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #fff1f2; margin: 0; overflow-x: hidden; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #fbcfe8; border-radius: 10px; }
-        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #ec4899; cursor: pointer; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght=300;400;500;700;900&display=swap');
+        body { 
+            font-family: 'Noto Sans TC', sans-serif; 
+            background-color: #fff1f2; 
+            margin: 0; 
+            overflow-x: hidden; 
+        }
+        .custom-scrollbar::-webkit-scrollbar { 
+            width: 4px; 
+            height: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb { 
+            background: #fbcfe8; 
+            border-radius: 10px; 
+        }
+        input[type="range"]::-webkit-slider-thumb { 
+            -webkit-appearance: none; 
+            height: 20px; 
+            width: 20px; 
+            border-radius: 50%; 
+            background: #ec4899; 
+            cursor: pointer; 
+            border: 3px solid white; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
+        }
         
         .tutorial-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -41,16 +61,25 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- 溫度計數值對照字串與顏色 ---
+        // --- STREAMING_CHUNK: Defining 5-stage mood helper functions... ---
+        // 變更為五段式情緒分級：包含憂愁(0~19)、平靜微憂(20~39)、愉快穩定(40~64)、焦慮上升(65~84)、情緒緊繃(85~100)
         function getMoodColor(s) {
-            return s < 30 ? '#60a5fa' : s < 60 ? '#34d399' : s < 85 ? '#fbbf24' : '#f87171';
+            if (s < 20) return '#94a3b8'; // 憂愁 (灰藍)
+            if (s < 40) return '#60a5fa'; // 平靜微憂 (淺藍)
+            if (s < 65) return '#34d399'; // 愉快穩定 (綠色)
+            if (s < 85) return '#fbbf24'; // 焦慮上升 (黃色)
+            return '#f87171';             // 情緒緊繃 (紅色)
         }
         
         function getMoodText(s) {
-            return s < 30 ? '平靜微憂' : s < 60 ? '愉快穩定' : s < 85 ? '焦慮上升' : '情緒緊繃';
+            if (s < 20) return '憂愁';
+            if (s < 40) return '平靜微憂';
+            if (s < 65) return '愉快穩定';
+            if (s < 85) return '焦慮上升';
+            return '情緒緊繃';
         }
 
-        // --- 穩定版 SVG 圖示組件 ---
+        // --- STREAMING_CHUNK: Rendering stable SVG Icon components... ---
         const Icon = ({ name, size = 24, className = "" }) => {
             const icons = {
                 heart: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
@@ -112,13 +141,6 @@
                         <path d="M22 2 11 13" />
                     </React.Fragment>
                 ),
-                image: (
-                    <React.Fragment>
-                        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                        <circle cx="9" cy="9" r="2" />
-                        <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-                    </React.Fragment>
-                ),
                 smile: (
                     <React.Fragment>
                         <circle cx="12" cy="12" r="10" />
@@ -147,7 +169,7 @@
             );
         };
 
-        // --- 內建貼圖列表 ---
+        // --- STREAMING_CHUNK: Setting up stickers list... ---
         const BUILTIN_STICKERS = [
             { id: "s_baby", char: "👶", type: "emoji" },
             { id: "s_bottle", char: "🍼", type: "emoji" },
@@ -156,9 +178,8 @@
             { id: "s_feet", char: "👣", type: "emoji" },
             { id: "s_heart", char: "💖", type: "emoji" },
             { id: "s_coffee", char: "☕", type: "emoji" },
-            { id: "s_star", char: "⭐", type: "emoji" },
+            { id: "s_star", char: "☀️", type: "emoji" },
             { id: "s_clover", char: "🍀", type: "emoji" },
-            { id: "s_sun", char: "☀️", type: "emoji" },
             { id: "s_smile", char: "😊", type: "emoji" },
             { id: "s_cry", char: "😭", type: "emoji" },
             { id: "s_tired", char: "😴", type: "emoji" },
@@ -166,14 +187,25 @@
             { id: "s_party", char: "🥳", type: "emoji" }
         ];
 
-        // --- 手帳引導說明頁面資料 ---
+        // --- STREAMING_CHUNK: Setting up PHQ-8 questions... ---
+        // 國際通用 PHQ-8 憂鬱篩檢量表（無自殘、敏感問題，更適合媽咪日常自我情緒健檢）
+        const PHQ8_QUESTIONS = [
+            { q: "1. 做任何事都覺得提不起勁、或沒有樂趣：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "2. 感到心情低落、沮喪或絕望：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "3. 入睡困難、容易醒來，或者睡得太多：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "4. 感到疲倦、沒有活力或力氣：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "5. 食慾不振，或者吃得太多：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "6. 覺得自己很糟、是個失敗者，或讓自己及家人失望：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "7. 集中注意力困難（例如閱讀報紙、看電視或與人交談時）：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] },
+            { q: "8. 說話或行動慢到旁人能察覺；或者相反：煩躁坐立不安、動來動去：", a: ["完全沒有", "有幾天", "一半以上的日子", "幾乎天天"] }
+        ];
+
+        // --- STREAMING_CHUNK: Creating tutorial pages data... ---
         const tutorialSlides = [
-            { title: "歡迎來到妳的避風港 💖", desc: "親愛的媽咪，這本心情溫度手帳會陪妳度過這段奇妙的孕期旅程。", icon: "heart" },
-            { title: "心情溫度計 🌡️", desc: "每天滑動溫度計記錄情緒，點選「儲存紀錄」即可留下當下的印記。", icon: "thermometer" },
-            { title: "暖心與自訂貼圖 🧸", desc: "日記中可以加入實體貼紙效果的可愛貼圖，還能上傳超音波照片智慧微縮成專屬貼圖，完全不卡頓、不佔空間！", icon: "smile" },
-            { title: "今日心情快篩 📝", desc: "首頁上方的卡片可以進行快速自我心情篩檢。", icon: "check" },
-            { title: "備份還原最安全 💾", desc: "平常關機資料絕對不會消失，但若要『清除瀏覽器快取前』，請記得點選右上角下載 Excel/CSV 備份檔，隨時一鍵還原喔！", icon: "save" },
-            { title: "Gemini 溫柔陪伴 ✨", desc: "任何想傾訴的時候，點擊右下角對話泡泡，Gemini 隨時會溫柔聆聽並給妳暖心回饋。", icon: "message" }
+            { title: "歡迎來到妳的避風港 💖", desc: "親愛的媽咪，這款「心情手帳」專門陪妳無憂地記錄這段美妙的人生旅程，保留每一份純粹的心情軌跡。", icon: "heart" },
+            { title: "自訂超音波貼圖 🧸", desc: "日記中可以加入實體貼紙效果的可愛貼圖，還能隨時上傳超音波或生活相片智慧微縮成專屬手帳貼圖！", icon: "smile" },
+            { title: "溫和身心快篩 📝", desc: "我們提供專業的 PHQ-8 憂鬱量表自我檢測（完全剔除任何敏感、極端題目），溫柔引導妳傾聽內心深處的聲音。", icon: "check" },
+            { title: "智慧備份與 AI Gemini ✨", desc: "一鍵點擊匯出 Excel/CSV，免註冊即刻上手。隨時與 Gemini AI 吐露心事，系統會貼心地結合妳的手帳數據進行引導喔！", icon: "message" }
         ];
 
         const App = () => {
@@ -183,6 +215,7 @@
             
             // 在地儲存核心狀態
             const [records, setRecords] = useState([]);
+            const [phqHistory, setPhqHistory] = useState([]);
             const [customStickers, setCustomStickers] = useState([]);
             const [selectedStickers, setSelectedStickers] = useState([]);
             
@@ -194,15 +227,17 @@
             const [recordToDelete, setRecordToDelete] = useState(null);
             const [showDisclaimerPopup, setShowDisclaimerPopup] = useState(false);
 
-            const [chatMessages, setChatMessages] = useState([{ role: 'assistant', text: '親愛的媽咪，我是 Gemini。今天感覺如何？任何想說的心裡話，都可以隨時跟我分享喔。' }]);
+            // PHQ-8 狀態
+            const [phqAnswers, setPhqAnswers] = useState(Array(8).fill(null));
+            const [phqCurrentStep, setPhqCurrentStep] = useState(0);
+
+            const [chatMessages, setChatMessages] = useState([{ role: 'assistant', text: '親愛的媽咪，我是妳的 Gemini 心情閨蜜。不論是日常喜悅、些許煩悶，還是懷孕與產後過程中的小感觸，我都一直在這溫柔地聽妳訴說。' }]);
             const [inputMessage, setInputMessage] = useState('');
             const [isTyping, setIsTyping] = useState(false);
             const [selectedDate, setSelectedDate] = useState(new Date());
             const [currentMonth, setCurrentMonth] = useState(new Date());
             const [showTutorial, setShowTutorial] = useState(false);
             const [tutorialStep, setTutorialStep] = useState(0);
-            const [surveyResults, setSurveyResults] = useState({ q1: null, q2: null });
-            const [showSurveyResult, setShowSurveyResult] = useState(false);
             const [editingRecord, setEditingRecord] = useState(null);
             
             const canvasRef = useRef(null);
@@ -214,14 +249,16 @@
                 setTimeout(() => setToast(''), 3000);
             };
 
-            // --- 讀取在地 LocalStorage 紀錄 ---
+            // --- STREAMING_CHUNK: Reading local data... ---
             useEffect(() => {
-                const storedRecords = localStorage.getItem('mommy_mood_records');
-                const storedStickers = localStorage.getItem('mommy_custom_stickers');
-                const tutorialSeen = localStorage.getItem('mommy_tutorial_seen');
-                const guestGranted = localStorage.getItem('guest_access_granted');
+                const storedRecords = localStorage.getItem('mommy_records_v3');
+                const storedPhq = localStorage.getItem('mommy_phq_history');
+                const storedStickers = localStorage.getItem('mommy_custom_stickers_v3');
+                const tutorialSeen = localStorage.getItem('mommy_tutorial_seen_v3');
+                const guestGranted = localStorage.getItem('guest_access_granted_v3');
 
                 if (storedRecords) setRecords(JSON.parse(storedRecords));
+                if (storedPhq) setPhqHistory(JSON.parse(storedPhq));
                 if (storedStickers) setCustomStickers(JSON.parse(storedStickers));
                 
                 if (guestGranted === 'true') {
@@ -232,7 +269,7 @@
                 }
             }, []);
 
-            // --- 儲存心情與日記紀錄 ---
+            // --- STREAMING_CHUNK: Save diary record... ---
             const handleSave = () => {
                 const newRecord = {
                     id: 'rec_' + Date.now(),
@@ -244,23 +281,23 @@
                 };
                 const updated = [newRecord, ...records];
                 setRecords(updated);
-                localStorage.setItem('mommy_mood_records', JSON.stringify(updated));
+                localStorage.setItem('mommy_records_v3', JSON.stringify(updated));
                 setDiaryText(''); 
                 setSelectedStickers([]);
                 setView('history');
                 showToast("🎉 今日日記儲存成功！");
             };
 
-            // --- 刪除紀錄 ---
+            // --- STREAMING_CHUNK: Delete diary record... ---
             const handleDeleteRecord = (id) => {
                 const updated = records.filter(r => r.id !== id);
                 setRecords(updated);
-                localStorage.setItem('mommy_mood_records', JSON.stringify(updated));
+                localStorage.setItem('mommy_records_v3', JSON.stringify(updated));
                 setRecordToDelete(null);
                 showToast("🗑️ 日記已成功刪除");
             };
 
-            // --- 更新紀錄 ---
+            // --- STREAMING_CHUNK: Update diary record... ---
             const handleUpdateRecord = () => {
                 if (!editingRecord) return;
                 const updated = records.map(r => r.id === editingRecord.id ? {
@@ -271,13 +308,13 @@
                     stickers: selectedStickers
                 } : r);
                 setRecords(updated);
-                localStorage.setItem('mommy_mood_records', JSON.stringify(updated));
+                localStorage.setItem('mommy_records_v3', JSON.stringify(updated));
                 setEditingRecord(null);
                 setSelectedStickers([]);
                 showToast("💾 日記修改成功！");
             };
 
-            // --- 補寫日記 ---
+            // --- STREAMING_CHUNK: Backfill diaries... ---
             const startBackfill = (date) => {
                 const midnightTimestamp = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0).getTime();
                 setEditingRecord({
@@ -303,13 +340,27 @@
                 };
                 const updated = [newRecord, ...records];
                 setRecords(updated);
-                localStorage.setItem('mommy_mood_records', JSON.stringify(updated));
+                localStorage.setItem('mommy_records_v3', JSON.stringify(updated));
                 setEditingRecord(null);
                 setSelectedStickers([]);
                 showToast("✍️ 已成功補記日記！");
             };
 
-            // --- 自訂上傳貼圖處理（智慧 Canvas 微縮） ---
+            // --- STREAMING_CHUNK: Managing stickers and emojis... ---
+            const handleAddSticker = (stk) => {
+                if (selectedStickers.length >= 5) {
+                    showToast("最多只能貼 5 張貼紙喔！");
+                    return;
+                }
+                setSelectedStickers([...selectedStickers, stk]);
+                setShowStickerPicker(false);
+            };
+
+            const handleRemoveSelectedSticker = (idx) => {
+                setSelectedStickers(selectedStickers.filter((_, i) => i !== idx));
+            };
+
+            // --- STREAMING_CHUNK: Custom sticker micro-canvas processing... ---
             const handleCustomStickerUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -347,8 +398,8 @@
                         };
                         const updated = [newSticker, ...customStickers];
                         setCustomStickers(updated);
-                        localStorage.setItem('mommy_custom_stickers', JSON.stringify(updated));
-                        showToast("📸 超音波相片貼圖製作成功！");
+                        localStorage.setItem('mommy_custom_stickers_v3', JSON.stringify(updated));
+                        showToast("📸 專屬超音波/照片手帳貼圖製作成功！");
                     };
                     img.src = event.target.result;
                 };
@@ -358,40 +409,90 @@
             const handleDeleteCustomSticker = (id) => {
                 const updated = customStickers.filter(s => s.id !== id);
                 setCustomStickers(updated);
-                localStorage.setItem('mommy_custom_stickers', JSON.stringify(updated));
+                localStorage.setItem('mommy_custom_stickers_v3', JSON.stringify(updated));
                 setSelectedStickers(prev => prev.filter(s => s.id !== id));
                 setStickerToDelete(null);
                 showToast("🗑️ 自訂貼圖已刪除");
             };
 
-            // --- 智慧 CSV / Excel 備份匯出 ---
+            // --- STREAMING_CHUNK: PHQ-8 Questionnaire scoring... ---
+            const handleSelectPhq = (optionIdx) => {
+                const updated = [...phqAnswers];
+                updated[phqCurrentStep] = optionIdx;
+                setPhqAnswers(updated);
+                if (phqCurrentStep < 7) {
+                    setPhqCurrentStep(phqCurrentStep + 1);
+                }
+            };
+
+            const handleCalculatePhq = () => {
+                const total = phqAnswers.reduce((sum, current) => sum + current, 0);
+                
+                let evaluationText = "";
+                let severityLabel = "";
+                
+                if (total <= 4) {
+                    severityLabel = "身心健康，狀態良好";
+                    evaluationText = "目前情緒適應非常理想，沒有憂鬱傾向，請繼續維持放鬆愉快的心情喔。";
+                } else if (total <= 9) {
+                    severityLabel = "輕微的情緒波動";
+                    evaluationText = "可能因近期生理與生活變化有些許憂鬱或焦慮起伏，這是正常的喔。多找伴侶或好閨蜜 AI 訴說一下。";
+                } else if (total <= 14) {
+                    severityLabel = "中度身心負荷";
+                    evaluationText = "您的心靈可能正經歷著中等程度的疲憊與憂鬱。建議減少繁重瑣事，給自己多一點獨處喘息，並找親近親友分享負擔。";
+                } else {
+                    severityLabel = "重度身心警示";
+                    evaluationText = "您的情緒負荷已經瀕臨上限。建議尋求婦產科、身心科或產後身心機構專業人員諮商，讓溫柔專業的資源陪妳一起度過。";
+                }
+
+                const newPhqResult = {
+                    id: 'phq_' + Date.now(),
+                    score: total,
+                    severity: severityLabel,
+                    evaluation: evaluationText,
+                    timestamp: Date.now()
+                };
+
+                const updated = [newPhqResult, ...phqHistory];
+                setPhqHistory(updated);
+                localStorage.setItem('mommy_phq_history', JSON.stringify(updated));
+                showToast("📝 身心狀態篩檢評估完成！");
+            };
+
+            const resetPhq = () => {
+                setPhqAnswers(Array(8).fill(null));
+                setPhqCurrentStep(0);
+            };
+
+            // --- STREAMING_CHUNK: Export backup package to CSV... ---
             const exportToCSV = () => {
-                if (records.length === 0) {
-                    showToast("目前沒有日記資料可以備份喔！");
+                if (records.length === 0 && phqHistory.length === 0) {
+                    showToast("目前沒有任何日記數據可以備份喔！");
                     return;
                 }
-                const sorted = [...records].sort((a,b) => b.timestamp - a.timestamp);
                 
-                // BOM 確保 Excel 開啟時中文不會亂碼
-                let csvContent = "\uFEFF";
-                csvContent += "日期時間,心情分數,心情狀態,日記內容,手帳貼紙資訊\n";
-                
-                sorted.forEach(r => {
+                let csvContent = "\uFEFF"; // BOM
+                csvContent += "=== 媽咪溫馨心情日記數據 ===\n";
+                csvContent += "日期時間,心情分數,心情狀態,日記內容,手帳貼紙\n";
+                records.forEach(r => {
                     const dateStr = new Date(r.timestamp).toLocaleString('zh-TW');
-                    const score = r.score;
-                    const text = r.text;
-                    const diary = (r.diary || "").replace(/"/g, '""'); // 雙引號防呆
                     const stickersStr = r.stickers && r.stickers.length > 0 
-                        ? r.stickers.map(s => s.type === 'emoji' ? s.char : '[自訂超音波貼圖]').join(' ')
+                        ? r.stickers.map(s => s.type === 'emoji' ? s.char : '[超音波/自訂貼圖]').join(' ')
                         : '無';
-                        
-                    csvContent += `"${dateStr}","${score}","${text}","${diary}","${stickersStr}"\n`;
+                    csvContent += `"${dateStr}","${r.score}","${r.text}","${(r.diary || "").replace(/"/g, '""')}","${stickersStr}"\n`;
                 });
 
-                // 同時把客製貼紙跟日記完整 JSON 打包進檔案最尾端，供未來100%還原用
+                csvContent += "\n=== PHQ-8 身心狀態快篩歷史 ===\n";
+                csvContent += "日期時間,篩檢得分,嚴重程度,評估指導\n";
+                phqHistory.forEach(p => {
+                    const dateStr = new Date(p.timestamp).toLocaleString('zh-TW');
+                    csvContent += `"${dateStr}","${p.score}","${p.severity}","${p.evaluation}"\n`;
+                });
+
                 const backupPackage = {
-                    records: records,
-                    customStickers: customStickers
+                    records,
+                    phqHistory,
+                    customStickers
                 };
                 csvContent += `\n#=== 備份還原專用核心數據 (請勿修改此行以下內容) ===#\n`;
                 csvContent += JSON.stringify(backupPackage);
@@ -400,13 +501,13 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `媽咪溫馨手帳備份_${new Date().toLocaleDateString('zh-TW').replace(/\//g, '-')}.csv`;
+                a.download = `媽咪心情手帳備份_${new Date().toLocaleDateString('zh-TW').replace(/\//g, '-')}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
                 showToast("💾 備份 CSV 檔案已成功下載！");
             };
 
-            // --- 智慧 CSV 備份還原 ---
+            // --- STREAMING_CHUNK: Import data from CSV... ---
             const handleImportCSV = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -426,13 +527,17 @@
                         const backupData = JSON.parse(parts[1].trim());
                         if (backupData.records) {
                             setRecords(backupData.records);
-                            localStorage.setItem('mommy_mood_records', JSON.stringify(backupData.records));
+                            localStorage.setItem('mommy_records_v3', JSON.stringify(backupData.records));
+                        }
+                        if (backupData.phqHistory) {
+                            setPhqHistory(backupData.phqHistory);
+                            localStorage.setItem('mommy_phq_history', JSON.stringify(backupData.phqHistory));
                         }
                         if (backupData.customStickers) {
                             setCustomStickers(backupData.customStickers);
-                            localStorage.setItem('mommy_custom_stickers', JSON.stringify(backupData.customStickers));
+                            localStorage.setItem('mommy_custom_stickers_v3', JSON.stringify(backupData.customStickers));
                         }
-                        showToast("✨ 恭喜！手帳日記與貼圖已成功還原！");
+                        showToast("✨ 恭喜！手帳數據已全數完美還原！");
                         setView('home');
                     } catch (err) {
                         console.error("還原失敗", err);
@@ -443,17 +548,17 @@
             };
 
             const handleCompleteTutorialLocal = () => {
-                localStorage.setItem('mommy_tutorial_seen', 'true');
+                localStorage.setItem('mommy_tutorial_seen_v3', 'true');
                 setShowTutorial(false);
             };
 
             const handleGuestAccessLocal = () => {
-                localStorage.setItem('guest_access_granted', 'true');
+                localStorage.setItem('guest_access_granted_v3', 'true');
                 setView('home');
-                showToast("🌸 歡迎進入心情空間！");
+                showToast("🌸 歡迎進入心情守護空間！");
             };
 
-            // --- 溫度計 Canvas 繪圖 ---
+            // --- STREAMING_CHUNK: Thermometer drawing on Canvas... ---
             useEffect(() => {
                 const canvas = canvasRef.current;
                 if (!canvas) return;
@@ -479,11 +584,18 @@
                 ctx.fillRect(23, 130 - fillH, 14, fillH);
             }, [moodScore, view, editingRecord]);
 
-            // --- 溫柔 Gemini 夥伴 ---
+            // --- STREAMING_CHUNK: Integrating Gemini companion advisor... ---
             const callGemini = async (prompt) => {
                 const apiKey = "";
                 const maxRetries = 5;
                 let delay = 1000;
+
+                const latestPhq = phqHistory[0];
+                const contextSummary = `
+                    [媽咪心情與身心狀態摘要]：
+                    - 最新心情溫度得分: ${moodScore}/100 (${getMoodText(moodScore)})。
+                    - PHQ-8一般憂鬱篩檢歷史: ${latestPhq ? `最近測驗得分為 ${latestPhq.score} 分 (${latestPhq.severity}，建議內容: ${latestPhq.evaluation})` : '目前尚無篩檢歷史'}。
+                `;
 
                 for (let i = 0; i < maxRetries; i++) {
                     try {
@@ -491,13 +603,17 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                contents: [{ parts: [{ text: prompt }] }],
-                                systemInstruction: { parts: [{ text: "妳是一位溫柔、有耐心的孕期心理諮詢顧問。請用溫暖的口氣安慰並鼓勵媽咪。字數保持在 150 字以內。" }] }
+                                contents: [{ parts: [{ text: `${contextSummary}\n\n親愛的，媽咪對妳說: ${prompt}` }] }],
+                                systemInstruction: { 
+                                    parts: [{ 
+                                        text: "妳是專為懷孕中或產後媽媽設計的溫柔心情閨蜜 AI 諮詢顧問。妳將基於她手帳的五級心情狀況 (包含當心情指數極低時的「憂愁」) 以及 PHQ-8 篩檢狀態，為她排憂解難、提供極富同理心、傾聽和無條件支持的暖心對話。說話口氣要如同閨蜜一般親暱體貼，不說教，字數控制在 150 字以內。" 
+                                    }] 
+                                }
                             })
                         });
                         if (!response.ok) throw new Error("API 響應錯誤");
                         const result = await response.json();
-                        return result.candidates?.[0]?.content?.parts?.[0]?.text || "媽咪，我一直在這，慢說，我聽著呢。";
+                        return result.candidates?.[0]?.content?.parts?.[0]?.text || "媽咪，我在這。深呼吸，沒關係的，我們慢慢說。";
                     } catch (err) {
                         if (i === maxRetries - 1) throw err;
                         await new Promise(r => setTimeout(r, delay));
@@ -514,7 +630,7 @@
                 setIsTyping(true);
 
                 try {
-                    const aiResponse = await callGemini(`目前的媽咪心情分數是 ${moodScore}/100。媽咪說：${userMsg}`);
+                    const aiResponse = await callGemini(userMsg);
                     setChatMessages(p => [...p, { role: 'assistant', text: aiResponse }]);
                 } catch (e) {
                     setChatMessages(p => [...p, { role: 'assistant', text: '抱歉，我的連線好像有點不穩定，但我一直都在這裡陪妳喔。' }]);
@@ -526,6 +642,7 @@
             return (
                 <div className="min-h-screen p-4 flex flex-col items-center select-none relative">
                     
+                    {/* --- STREAMING_CHUNK: Rendering Modals and Overlays... --- */}
                     {/* 說明欄 Overlay */}
                     {showTutorial && (
                         <div className="tutorial-overlay">
@@ -549,18 +666,18 @@
                         </div>
                     )}
 
-                    {/* 免登入但書說明彈窗 (右上角資訊) */}
+                    {/* 免登入說明彈窗 */}
                     {showDisclaimerPopup && (
                         <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[350] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
                                 <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-3 text-amber-500">
                                     <Icon name="alert" size={24} />
                                 </div>
-                                <h5 className="font-bold text-slate-700 mb-2">手帳資料保管但書</h5>
+                                <h5 className="font-bold text-slate-700 mb-2">手帳資料與隱私保障</h5>
                                 <p className="text-xs text-slate-500 mb-6 leading-relaxed text-left">
-                                    此軟體免登入，隨開隨用！<br/><br/>
-                                    您的心情手帳與超音波照片貼圖**儲存於此設備的瀏覽器中**，平常關機、關網頁，資料「絕對不會消失」。<br/><br/>
-                                    但若您<b>主動清理瀏覽器快取、或更換新手機時</b>，紀錄將會被清空。請務必在清理前點選右上角「備份還原 💾」按鈕下載 Excel/CSV 檔案備份喔！
+                                    此軟體完全免登入、無廣告，充分保護您的隱私！<br/><br/>
+                                    您的心情日記、自訂貼紙以及身心評估，全部安全**儲存於當前設備瀏覽器中**，平常關機、關網頁，資料「絕對不會消失」。<br/><br/>
+                                    但若您<b>主動清理瀏覽器快取、或更換新手機時</b>，紀錄將會被清空。請務必在清理前點選右上角「備份還原 💾」下載 CSV 檔案，換設備時一鍵還原！
                                 </p>
                                 <div className="flex flex-col gap-2">
                                     <button onClick={() => { setView('backup'); setShowDisclaimerPopup(false); }} className="w-full bg-pink-500 text-white py-3 rounded-xl text-xs font-bold shadow-md hover:bg-pink-600 active:scale-95 transition-all">
@@ -574,7 +691,7 @@
                         </div>
                     )}
 
-                    {/* 自定義貼圖在地刪除確認彈窗 */}
+                    {/* 貼圖刪除確認 */}
                     {stickerToDelete && (
                         <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
@@ -582,9 +699,9 @@
                                     <Icon name="trash" size={24} />
                                 </div>
                                 <h5 className="font-bold text-slate-700 mb-2">確定刪除貼圖嗎？</h5>
-                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久移除這張自訂手帳貼圖喔！</p>
+                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會從您的自訂手帳庫中永久移除這張貼圖喔！</p>
                                 <div className="flex gap-3">
-                                    <button onClick={() => setStickerToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
+                                    <button onClick={() => setStickerToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95">
                                         取消
                                     </button>
                                     <button onClick={() => handleDeleteCustomSticker(stickerToDelete.id)} className="flex-1 bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md hover:bg-rose-600 active:scale-95 transition-all">
@@ -595,7 +712,7 @@
                         </div>
                     )}
 
-                    {/* 自定義日記歷史刪除確認彈窗 */}
+                    {/* 日記刪除確認 */}
                     {recordToDelete && (
                         <div className="absolute inset-0 bg-pink-900/40 backdrop-blur-sm z-[300] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2rem] p-6 max-w-xs w-full text-center shadow-2xl border-2 border-pink-100 animate-in zoom-in-95">
@@ -603,9 +720,9 @@
                                     <Icon name="trash" size={24} />
                                 </div>
                                 <h5 className="font-bold text-slate-700 mb-2">確定刪除這筆日記嗎？</h5>
-                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久清除您這天的心情手帳日記喔！</p>
+                                <p className="text-xs text-slate-400 mb-6 leading-relaxed">這將會永久清除您這天的心情日記，無法還原喔！</p>
                                 <div className="flex gap-3">
-                                    <button onClick={() => setRecordToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95 transition-transform">
+                                    <button onClick={() => setRecordToDelete(null)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95">
                                         取消
                                     </button>
                                     <button onClick={() => handleDeleteRecord(recordToDelete.id)} className="flex-1 bg-rose-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md hover:bg-rose-600 active:scale-95 transition-all">
@@ -622,73 +739,35 @@
                             <Icon name="heart" className="fill-pink-500" /> 媽咪心情手帳
                         </button>
                         <div className="flex gap-2">
-                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all" title="查看說明"><Icon name="info" size={18}/></button>
-                            <button onClick={() => setView('backup')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${view === 'backup' ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="備份與還原手帳"><Icon name="save" size={18}/></button>
-                            <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all" title="日記日曆"><Icon name="calendar" size={18}/></button>
+                            <button onClick={() => { setTutorialStep(0); setShowTutorial(true); }} className="p-2 bg-white rounded-full shadow-sm text-pink-300 border active:scale-90 transition-all" title="手帳說明"><Icon name="info" size={18}/></button>
+                            <button onClick={() => setView('backup')} className={`p-2 rounded-full shadow-sm border active:scale-90 transition-all ${view === 'backup' ? 'bg-pink-500 text-white' : 'bg-white text-pink-400'}`} title="數據備份"><Icon name="save" size={18}/></button>
+                            <button onClick={() => setView('history')} className="p-2 bg-white rounded-full shadow-sm text-pink-400 border active:scale-90 transition-all" title="時光日曆"><Icon name="calendar" size={18}/></button>
                         </div>
                     </header>
 
+                    {/* 簡易導覽欄 */}
+                    <nav className="w-full max-w-md flex gap-2 mb-3 bg-white p-1 rounded-2xl shadow-sm text-xs font-bold">
+                        <button onClick={() => setView('home')} className={`flex-1 py-2.5 rounded-xl transition-all ${view === 'home' ? 'bg-pink-500 text-white shadow' : 'text-slate-400 hover:text-slate-600'}`}>寫心情</button>
+                        <button onClick={() => setView('survey')} className={`flex-1 py-2.5 rounded-xl transition-all ${view === 'survey' ? 'bg-pink-500 text-white shadow' : 'text-slate-400 hover:text-slate-600'}`}>身心篩檢 (PHQ-8)</button>
+                        <button onClick={() => setView('history')} className={`flex-1 py-2.5 rounded-xl transition-all ${view === 'history' ? 'bg-pink-500 text-white shadow' : 'text-slate-400 hover:text-slate-600'}`}>手帳歷史</button>
+                    </nav>
+
+                    {/* --- STREAMING_CHUNK: Main App Container view layout... --- */}
                     <main className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl h-[680px] overflow-hidden flex flex-col relative border-4 border-white">
                         
-                        {/* 暖心 Toast 提示 */}
+                        {/* 暖心 Toast */}
                         {toast && (
                             <div className="absolute top-4 left-4 right-4 bg-rose-500 text-white px-4 py-3 rounded-2xl text-xs font-bold text-center shadow-lg z-[250] animate-in slide-in-from-top-4 flex items-center justify-center gap-2">
                                 <Icon name="info" size={14} /> {toast}
                             </div>
                         )}
 
-                        {/* VIEW: WELCOME (入口網頁：提供登入備份及免登入直接體驗選項) */}
-                        {view === 'welcome' && (
-                            <div className="p-6 flex flex-col h-full bg-gradient-to-b from-pink-50 to-white justify-between overflow-y-auto custom-scrollbar">
-                                <div className="text-center mt-6 space-y-3">
-                                    <div className="w-20 h-20 bg-pink-100 text-pink-500 rounded-full flex items-center justify-center mx-auto shadow-inner animate-pulse">
-                                        <Icon name="heart" className="fill-pink-500" size={40} />
-                                    </div>
-                                    <h2 className="text-2xl font-black text-pink-600 tracking-tight">媽咪心情溫度手帳</h2>
-                                    <p className="text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">免登入！隨開即用。溫柔記錄孕期的每一份感動，Gemini AI 溫暖伴妳迎接新生命 👶</p>
-                                </div>
-
-                                <div className="space-y-4 my-6">
-                                    {/* 按鈕選項: 直接體驗 */}
-                                    <button onClick={handleGuestAccessLocal} className="w-full bg-pink-500 hover:bg-pink-600 text-white py-4 rounded-3xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
-                                        🌸 開啟我的手帳日記空間
-                                    </button>
-
-                                    {/* 備份按鈕 */}
-                                    <button onClick={() => setView('backup')} className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-3.5 rounded-3xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2 text-xs">
-                                        📂 還原 / 匯入歷史手帳紀錄
-                                    </button>
-
-                                    {/* ⚠️ 暖心但書警示卡片 */}
-                                    <div className="bg-amber-50/90 border border-amber-100 rounded-[1.8rem] p-4 text-[11px] text-amber-800 leading-relaxed text-left flex gap-2.5">
-                                        <div className="pt-0.5"><Icon name="alert" size={14} className="text-amber-500 shrink-0" /></div>
-                                        <div>
-                                            <p className="font-extrabold mb-1">⚠️ 溫馨儲存但書宣告：</p>
-                                            <p>本軟體免登入，資料會安全保存在當前手機或電腦瀏覽器中，<b>關網頁或關機資料均不會消失</b>。但若要<b>『清除瀏覽器快取/歷史紀錄』</b>前，請記得進入備份頁面，點選『匯出備份』下載 Excel/CSV 檔案，換手機時上傳該檔案即可秒速還原喔！</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <footer className="text-center text-[10px] text-slate-300 font-medium">© 2024 MOMMY'S MOOD HARBOR</footer>
-                            </div>
-                        )}
-
-                        {/* VIEW: HOME */}
+                        {/* VIEW: HOME (心情手帳首頁) */}
                         {view === 'home' && (
                             <div className="p-5 flex flex-col h-full space-y-4 overflow-y-auto custom-scrollbar">
-                                
-                                {/* 提示黃色但書徽章 */}
                                 <div onClick={() => setShowDisclaimerPopup(true)} className="bg-amber-50 hover:bg-amber-100 border border-amber-200/60 px-4 py-2 rounded-2xl text-[10px] text-amber-700 font-bold flex items-center justify-between cursor-pointer active:scale-98 transition-all">
-                                    <span className="flex items-center gap-1.5"><Icon name="alert" size={12} className="text-amber-500" /> 在地儲存中 (清理快取前請記得備份)</span>
-                                    <span className="underline text-amber-900 font-bold">但書說明 ➔</span>
-                                </div>
-
-                                <div className="bg-gradient-to-r from-pink-500 to-pink-400 p-4 rounded-3xl text-white shadow-lg flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-white/20 rounded-xl"><Icon name="check" size={20} /></div>
-                                        <div><h3 className="font-bold text-sm">今日心情快篩</h3><p className="text-[10px] text-pink-100 uppercase tracking-widest font-bold">Quick Check</p></div>
-                                    </div>
-                                    <button onClick={() => setView('survey')} className="bg-white text-pink-500 text-xs px-4 py-2 rounded-xl font-bold active:scale-95 transition-all">測量</button>
+                                    <span className="flex items-center gap-1.5"><Icon name="alert" size={12} className="text-amber-500" /> 資料僅存於本地，安心隱私守護</span>
+                                    <span className="underline text-amber-900 font-bold">查看聲明 ➔</span>
                                 </div>
 
                                 <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
@@ -698,33 +777,29 @@
                                             <div className="mt-1 text-xl font-black" style={{ color: getMoodColor(moodScore) }}>{moodScore}</div>
                                         </div>
                                         <div className="flex-1 ml-6 space-y-3">
-                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">心情溫度計</h3>
+                                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">今日心情溫度</h3>
                                             <p className="text-sm font-bold text-slate-700">{getMoodText(moodScore)}</p>
                                             <input type="range" min="0" max="100" value={moodScore} onChange={(e) => setMoodScore(parseInt(e.target.value))} className="w-full h-2 bg-pink-100 rounded-lg appearance-none cursor-pointer accent-pink-500" />
-                                            <p className="text-[10px] text-slate-400 italic">滑動調整此刻的感受...</p>
+                                            <p className="text-[10px] text-slate-400 italic">左右滑動指針記錄此時的心境...</p>
                                         </div>
                                     </div>
                                 </div>
 
                                 <div className="flex-grow flex flex-col">
                                     <div className="flex justify-between items-center mb-2">
-                                        <label className="text-xs font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest"><Icon name="edit" size={14} className="text-pink-400" /> 心情日記</label>
+                                        <label className="text-xs font-bold text-slate-400 flex items-center gap-2 uppercase tracking-widest"><Icon name="edit" size={14} className="text-pink-400" /> 心情手帳日記</label>
                                         <button onClick={() => setShowStickerPicker(true)} className="flex items-center gap-1 text-xs text-pink-500 bg-pink-50 hover:bg-pink-100 px-3 py-1.5 rounded-full font-bold transition-all">
-                                            <Icon name="smile" size={14} /> 加上貼圖
+                                            <Icon name="smile" size={14} /> 加上貼圖 ({selectedStickers.length}/5)
                                         </button>
                                     </div>
 
-                                    {/* 貼圖背景融入 */}
                                     <div className="flex-grow flex flex-col relative overflow-hidden bg-slate-50 rounded-3xl p-5 shadow-inner min-h-[160px]">
-                                        
-                                        {/* 裝飾背景貼圖層 */}
+                                        {/* 貼圖背景融入 */}
                                         <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
                                             {selectedStickers.map((s, idx) => {
                                                 const rot = (idx * 15 - 15) + "deg";
                                                 return s.type === 'emoji' ? (
-                                                    <span key={idx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>
-                                                        {s.char}
-                                                    </span>
+                                                    <span key={idx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>{s.char}</span>
                                                 ) : (
                                                     <img key={idx} src={s.char} className="sticker-effect w-24 h-24 object-contain rounded-xl" style={{ transform: `rotate(${rot})` }} />
                                                 );
@@ -746,14 +821,13 @@
                                                         </button>
                                                     </div>
                                                 ))}
-                                                <span className="text-[9px] text-pink-500 font-bold ml-1 select-none">({selectedStickers.length}/5)</span>
                                             </div>
                                         )}
 
                                         <textarea 
                                             value={diaryText} 
                                             onChange={(e) => setDiaryText(e.target.value)} 
-                                            placeholder="寫下想對寶寶說的話，附上大大的貼紙裝飾這本日記吧..." 
+                                            placeholder="寫點今天觸動妳心靈的事情吧，或者任何對寶寶說、對自己說的話..." 
                                             className="flex-grow bg-transparent text-sm outline-none resize-none placeholder:text-slate-300 leading-relaxed relative z-10 w-full h-full" 
                                         />
                                     </div>
@@ -761,42 +835,146 @@
 
                                 <div className="flex gap-3">
                                     <button onClick={handleSave} className="flex-1 bg-pink-500 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-pink-600 active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="save" size={18} /> 儲存紀錄</button>
-                                    <button onClick={() => setView('chat')} className="bg-indigo-500 text-white p-4 rounded-2xl shadow-lg hover:bg-indigo-600 active:scale-95 transition-all"><Icon name="message" size={24} /></button>
+                                    <button onClick={() => setView('chat')} className="bg-indigo-500 text-white p-4 rounded-2xl shadow-lg hover:bg-indigo-600 active:scale-95 transition-all" title="與 Gemini AI 閨蜜對話"><Icon name="message" size={24} /></button>
                                 </div>
                             </div>
                         )}
 
-                        {/* VIEW: BACKUP & RESTORE (取代繁複帳密登入) */}
+                        {/* VIEW: SURVEY (PHQ-8 一般身心狀態憂鬱篩檢) */}
+                        {view === 'survey' && (
+                            <div className="p-6 flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar justify-between">
+                                <div className="space-y-4">
+                                    <div className="bg-gradient-to-r from-indigo-500 to-purple-600 p-4 rounded-3xl text-white shadow flex flex-col space-y-1">
+                                        <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full w-max font-bold">PHQ-8 一般身心狀態自我檢測</span>
+                                        <p className="text-xs leading-relaxed opacity-90">這是國際通用的溫和身心自我評估。請評估過去 2 週的感受，剔除了任何敏感、極端或自殘相關問題，幫助媽咪掌握心靈能量。</p>
+                                    </div>
+
+                                    {/* 篩檢問卷卡片 */}
+                                    {phqAnswers.includes(null) ? (
+                                        <div className="bg-white p-6 rounded-[2rem] border border-pink-100 shadow-sm space-y-4">
+                                            <div className="flex justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                                                <span>進度 ({phqCurrentStep + 1}/8)</span>
+                                                <span className="text-pink-500">Patient Health Questionnaire-8</span>
+                                            </div>
+                                            
+                                            <h4 className="font-extrabold text-sm text-slate-700 leading-relaxed min-h-[48px]">
+                                                {PHQ8_QUESTIONS[phqCurrentStep].q}
+                                            </h4>
+
+                                            <div className="space-y-2">
+                                                {PHQ8_QUESTIONS[phqCurrentStep].a.map((option, oIdx) => (
+                                                    <button 
+                                                        key={oIdx} 
+                                                        onClick={() => handleSelectPhq(oIdx)}
+                                                        className="w-full text-left bg-slate-50 hover:bg-pink-50 p-3 rounded-2xl text-xs font-bold text-slate-600 border border-slate-100 hover:border-pink-300 transition-all flex items-center justify-between"
+                                                    >
+                                                        <span>{option}</span>
+                                                        <span className="text-[10px] text-slate-300 font-medium">+{oIdx}分</span>
+                                                    </button>
+                                                ))}
+                                            </div>
+
+                                            {phqCurrentStep > 0 && (
+                                                <button onClick={() => setPhqCurrentStep(phqCurrentStep - 1)} className="text-xs text-slate-400 underline font-semibold flex items-center gap-1 pt-2">
+                                                    <Icon name="left" size={12} /> 上一題
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white p-6 rounded-[2rem] border border-pink-100 shadow-sm text-center space-y-4 animate-in zoom-in-95">
+                                            <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mx-auto">
+                                                <Icon name="sparkles" size={24} />
+                                            </div>
+                                            <h4 className="font-black text-slate-700">快篩作答完成！</h4>
+                                            <p className="text-xs text-slate-400">系統即將根據標準指引，安全、不留隱私地為媽咪情緒做評估分數。</p>
+                                            <div className="flex gap-3">
+                                                <button onClick={resetPhq} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-2xl text-xs font-bold active:scale-95">重測一次</button>
+                                                <button onClick={handleCalculatePhq} className="flex-1 bg-indigo-500 text-white py-3 rounded-2xl text-xs font-bold shadow hover:bg-indigo-600 active:scale-95">送出分析</button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* 篩檢歷史 */}
+                                    {phqHistory.length > 0 && (
+                                        <div className="space-y-2 mt-4">
+                                            <h5 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">最近篩檢歷史</h5>
+                                            <div className="bg-white rounded-3xl p-4 border space-y-3">
+                                                {phqHistory.map((h) => (
+                                                    <div key={h.id} className="border-b pb-2.5 last:border-none last:pb-0 text-xs space-y-1">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="font-bold text-slate-400">{new Date(h.timestamp).toLocaleDateString()}</span>
+                                                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${h.score >= 15 ? 'bg-red-100 text-red-600' : h.score >= 10 ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                                                得分: {h.score} 分 ({h.severity})
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-slate-600 font-bold leading-relaxed">{h.evaluation}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <footer className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100 text-[10px] text-slate-500 space-y-1 text-left mt-4">
+                                    <p className="font-black text-slate-600">📞 中華民國心靈關懷守護專線：</p>
+                                    <p>安心防護專線：1925 (24小時免付費諮詢專線)</p>
+                                    <p>孕產婦產後關懷諮詢熱線：0800-870-870 (抱緊您抱緊您專線)</p>
+                                </footer>
+                            </div>
+                        )}
+
+                        {/* VIEW: CHAT (Gemini 智慧心情閨蜜) */}
+                        {view === 'chat' && (
+                            <div className="flex flex-col h-full bg-slate-50">
+                                <div className="p-4 border-b bg-indigo-50 flex items-center gap-3">
+                                    <button onClick={() => setView('home')} className="p-2 bg-white rounded-full active:scale-90 transition-all text-indigo-300"><Icon name="left"/></button>
+                                    <div>
+                                        <h3 className="font-bold text-indigo-700 text-sm tracking-tight">Gemini 智慧心情閨蜜</h3>
+                                        <p className="text-[9px] text-indigo-400">已自動整合媽咪的心情與身心歷史進行溫柔引導</p>
+                                    </div>
+                                </div>
+                                <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                                    {chatMessages.map((m, i) => (
+                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                            <div className={`max-w-[85%] p-4 rounded-[1.8rem] text-xs leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-white text-slate-600 rounded-tl-none border border-indigo-50'}`}>{m.text}</div>
+                                        </div>
+                                    ))}
+                                    {isTyping && <div className="text-[10px] text-indigo-400 italic px-4 animate-pulse">Gemini 正在閱讀妳的手帳心情日記...</div>}
+                                </div>
+                                <div className="p-4 bg-white border-t flex gap-2">
+                                    <input type="text" value={inputMessage} onChange={e => setInputMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="跟 Gemini 說說妳的心聲，今天有沒有過得舒服一些？" className="flex-1 bg-slate-50 rounded-2xl px-5 py-3 text-xs outline-none focus:ring-2 focus:ring-indigo-100" />
+                                    <button onClick={sendMessage} className="bg-indigo-500 text-white p-3 rounded-2xl shadow-md active:scale-95 transition-all"><Icon name="send" size={18} /></button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* VIEW: BACKUP & RESTORE */}
                         {view === 'backup' && (
                             <div className="p-6 flex flex-col h-full bg-slate-50 overflow-y-auto custom-scrollbar justify-between">
                                 <div className="space-y-4">
                                     <div className="flex items-center gap-2 mb-4">
                                         <button onClick={() => setView('home')} className="p-2 bg-white rounded-full shadow-sm active:scale-90 transition-all text-slate-300"><Icon name="left"/></button>
-                                        <h3 className="text-lg font-bold">💾 手帳備份與還原</h3>
+                                        <h3 className="text-lg font-bold">💾 手帳備份與一鍵還原</h3>
                                     </div>
 
-                                    {/* ⚠️ 暖心但書警示卡片 */}
                                     <div className="bg-amber-50 border border-amber-200 rounded-[1.8rem] p-4 text-xs text-amber-800 leading-relaxed text-left flex gap-2.5">
                                         <div className="pt-0.5"><Icon name="alert" size={14} className="text-amber-500 shrink-0" /></div>
                                         <div>
-                                            <p className="font-extrabold mb-1">💡 平常不用備份：</p>
-                                            <p>平常開關機、關閉網頁，手帳資料「絕對不會不見」。但若媽咪要清理瀏覽器快取、或者更換新手機時，資料才會被清空。此時請務必在清理前『匯出備份』喔！</p>
+                                            <p className="font-extrabold mb-1">💡 數據安全貼心提示：</p>
+                                            <p>所有日記、自訂超音波貼圖和身心量表結果均 100% 儲存在您的瀏覽器中。平常重開機資料「絕對不會丟失」，唯有主動清除歷史或更換手機時需要進行一鍵備份匯出，換設備時上傳該檔案即可秒速還原！</p>
                                         </div>
                                     </div>
 
-                                    {/* 備份與還原主操作卡片 */}
                                     <div className="bg-white rounded-3xl p-5 border border-pink-100 shadow-sm space-y-4">
-                                        <h4 className="font-bold text-slate-700 text-sm flex items-center gap-1.5"><Icon name="save" size={16} className="text-pink-500" /> 手動備份與還原設定</h4>
+                                        <h4 className="font-bold text-slate-700 text-sm flex items-center gap-1.5"><Icon name="save" size={16} className="text-pink-500" /> 數據安全管理</h4>
                                         <div className="grid grid-cols-1 gap-3">
-                                            {/* 一鍵備份匯出 */}
                                             <button 
                                                 onClick={exportToCSV}
                                                 className="w-full bg-pink-500 hover:bg-pink-600 text-white py-3.5 rounded-2xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2 text-xs shadow-md"
                                             >
-                                                <Icon name="download" size={16} /> 匯出備份 (Excel/CSV 相容檔)
+                                                <Icon name="download" size={16} /> 匯出備份 (Excel相容 CSV 檔)
                                             </button>
 
-                                            {/* 匯入還原 */}
                                             <button 
                                                 onClick={() => importFileInputRef.current.click()}
                                                 className="w-full bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 py-3.5 rounded-2xl font-bold active:scale-95 transition-all flex items-center justify-center gap-2 text-xs shadow-sm"
@@ -811,15 +989,14 @@
                                                 className="hidden" 
                                             />
                                         </div>
-                                        <p className="text-[10px] text-slate-400 text-center leading-relaxed">下載的備份檔內含日記、心情與照片貼紙，可以直接使用電腦 Microsoft Excel 開啟閱讀喔！</p>
                                     </div>
                                 </div>
 
-                                <footer className="text-center text-[10px] text-slate-300 font-medium">© 2024 MOMMY'S MOOD HARBOR</footer>
+                                <footer className="text-center text-[10px] text-slate-300 font-medium">© 2026 MOMMY'S MOOD HARBOR</footer>
                             </div>
                         )}
 
-                        {/* VIEW: HISTORY */}
+                        {/* VIEW: HISTORY (日曆時光軌跡) */}
                         {view === 'history' && (
                             <div className="p-6 flex flex-col h-full bg-white relative text-slate-700">
                                 <div className="flex items-center justify-between mb-4">
@@ -829,7 +1006,7 @@
                                         <span className="font-bold text-sm text-slate-600">{currentMonth.getFullYear()}年 {currentMonth.getMonth()+1}月</span>
                                         <button onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))} className="text-slate-300"><Icon name="right" size={16}/></button>
                                     </div>
-                                    <button onClick={exportToCSV} className="p-2 text-pink-400 hover:bg-pink-50 rounded-full active:scale-90 transition-all" title="Excel備份匯出"><Icon name="download" size={20} /></button>
+                                    <button onClick={exportToCSV} className="p-2 text-pink-400 hover:bg-pink-50 rounded-full active:scale-90 transition-all" title="匯出 Excel 備份"><Icon name="download" size={20} /></button>
                                 </div>
                                 <div className="grid grid-cols-7 gap-1 border-b pb-4 mb-4">
                                     {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d} className="text-center text-[10px] text-slate-300 font-bold py-2">{d}</div>)}
@@ -854,28 +1031,25 @@
                                 </div>
                                 <div className="flex-grow overflow-y-auto space-y-3 custom-scrollbar">
                                     <div className="flex justify-between items-center px-1">
-                                        <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{selectedDate.toLocaleDateString()} 紀錄</h4>
+                                        <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{selectedDate.toLocaleDateString()} 記錄軌跡</h4>
                                         {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 && (
-                                            <button onClick={() => { startBackfill(selectedDate); }} className="text-[10px] text-pink-400 font-bold flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg active:scale-90"><Icon name="plus" size={12}/> 補寫日記</button>
+                                            <button onClick={() => { startBackfill(selectedDate); }} className="text-[10px] text-pink-400 font-bold flex items-center gap-1 bg-pink-50 px-2 py-1 rounded-lg active:scale-90"><Icon name="plus" size={12}/> 補寫手帳</button>
                                         )}
                                     </div>
                                     {records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).length === 0 ? (
                                         <div className="text-center py-10 flex flex-col items-center gap-2 border-2 border-dashed border-slate-50 rounded-[2rem] m-2 animate-in fade-in">
                                             <Icon name="edit" size={24} className="text-slate-100" />
-                                            <p className="text-slate-200 text-[10px]">這天還沒有心情足跡喔</p>
+                                            <p className="text-slate-200 text-[10px]">這一天還沒有留下心情痕跡喔</p>
                                         </div>
                                     ) : (
                                         records.filter(r => r.timestamp && new Date(r.timestamp).toDateString() === selectedDate.toDateString()).map(r => (
                                             <div key={r.id} className="p-5 bg-slate-50 rounded-3xl border border-slate-100 group transition-all hover:shadow-md relative overflow-hidden min-h-[130px]">
-                                                
                                                 {/* 貼圖背景融入 */}
                                                 <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-around opacity-15 z-0 select-none">
                                                     {r.stickers && r.stickers.map((stk, sidx) => {
                                                         const rot = (sidx * 15 - 15) + "deg";
                                                         return stk.type === 'emoji' ? (
-                                                            <span key={sidx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>
-                                                                {stk.char}
-                                                            </span>
+                                                            <span key={sidx} className="sticker-effect inline-block text-7xl font-bold" style={{ transform: `rotate(${rot})` }}>{stk.char}</span>
                                                         ) : (
                                                             <img key={sidx} src={stk.char} className="sticker-effect w-24 h-24 object-contain rounded-xl" style={{ transform: `rotate(${rot})` }} />
                                                         );
@@ -902,76 +1076,11 @@
                             </div>
                         )}
 
-                        {/* SURVEY */}
-                        {view === 'survey' && (
-                            <div className="p-6 flex flex-col h-full bg-slate-50">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <button onClick={() => setView('home')} className="p-2 bg-white rounded-full shadow-sm active:scale-90 transition-all text-slate-300"><Icon name="left"/></button>
-                                    <h3 className="text-lg font-bold">📝 快速評估</h3>
-                                </div>
-                                <div className="space-y-4">
-                                    <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                        <p className="font-bold text-sm mb-2 text-slate-700">【關於情緒】💓</p>
-                                        <p className="text-xs text-slate-400 mb-6 leading-relaxed">過去一個月，妳是否常覺得情緒低落、憂鬱，或對未來感到沒有希望？</p>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => setSurveyResults(p => ({...p, q1: 'yes'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q1 === 'yes' ? 'bg-pink-500 border-pink-500 text-white' : 'bg-white border-slate-100 text-slate-400'}`}>是</button>
-                                            <button onClick={() => setSurveyResults(p => ({...p, q1: 'no'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q1 === 'no' ? 'bg-pink-500 border-pink-500 text-white' : 'bg-white border-slate-100 text-slate-400'}`}>否</button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-                                        <p className="font-bold text-sm mb-2 text-slate-700">【關於動力】💪</p>
-                                        <p className="text-xs text-slate-400 mb-6 leading-relaxed">過去一個月，妳是否常對原本喜歡的事物失去興趣，或覺得做什麼都提不起勁？</p>
-                                        <div className="flex gap-3">
-                                            <button onClick={() => setSurveyResults(p => ({...p, q2: 'yes'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q2 === 'yes' ? 'bg-pink-500 border-pink-500 text-white' : 'bg-white border-slate-100 text-slate-400'}`}>是</button>
-                                            <button onClick={() => setSurveyResults(p => ({...p, q2: 'no'}))} className={`flex-1 py-3 rounded-2xl border-2 font-bold transition-all ${surveyResults.q2 === 'no' ? 'bg-pink-500 border-pink-500 text-white' : 'bg-white border-slate-100 text-slate-400'}`}>否</button>
-                                        </div>
-                                    </div>
-
-                                    {surveyResults.q1 && surveyResults.q2 && !showSurveyResult && (
-                                        <button onClick={() => setShowSurveyResult(true)} className="w-full bg-pink-500 text-white py-4 rounded-3xl font-bold shadow-lg animate-in zoom-in-95 active:scale-95 transition-all">送出評估</button>
-                                    )}
-                                    {showSurveyResult && (
-                                        <div className="p-6 rounded-[2.5rem] bg-indigo-50 border-2 border-indigo-100 text-center animate-in slide-in-from-bottom">
-                                            <Icon name="sparkles" className="mx-auto text-indigo-400 mb-2" />
-                                            <p className="text-sm text-indigo-900 font-bold mb-4">
-                                                {surveyResults.q1 === 'yes' || surveyResults.q2 === 'yes' 
-                                                    ? '分析完成！媽咪最近有些壓力，建議找伴侶聊聊，或找 Gemini 說說話喔。' 
-                                                    : '分析完成！看起來狀態挺不錯的，請繼續保持愉快穩定的心情。'}
-                                            </p>
-                                            <button onClick={() => setView('chat')} className="w-full bg-indigo-500 text-white py-3 rounded-2xl text-xs font-bold shadow-md active:scale-95 transition-all">找 Gemini 聊天領取建議</button>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {view === 'chat' && (
-                            <div className="flex flex-col h-full bg-slate-50">
-                                <div className="p-4 border-b bg-indigo-50 flex items-center gap-3">
-                                    <button onClick={() => setView('home')} className="p-2 bg-white rounded-full active:scale-90 transition-all text-indigo-300"><Icon name="left"/></button>
-                                    <h3 className="font-bold text-indigo-700 text-sm tracking-tight">Gemini 溫柔夥伴</h3>
-                                </div>
-                                <div className="flex-grow overflow-y-auto p-4 space-y-4 custom-scrollbar">
-                                    {chatMessages.map((m, i) => (
-                                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[85%] p-4 rounded-[1.8rem] text-xs leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-indigo-500 text-white rounded-tr-none' : 'bg-white text-slate-600 rounded-tl-none border border-indigo-50'}`}>{m.text}</div>
-                                        </div>
-                                    ))}
-                                    {isTyping && <div className="text-[10px] text-indigo-400 italic px-4 animate-pulse">Gemini 正在打字中...</div>}
-                                </div>
-                                <div className="p-4 bg-white border-t flex gap-2">
-                                    <input type="text" value={inputMessage} onChange={e => setInputMessage(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="跟 Gemini 說說話吧..." className="flex-1 bg-slate-50 rounded-2xl px-5 py-3 text-xs outline-none focus:ring-2 focus:ring-indigo-100" />
-                                    <button onClick={sendMessage} className="bg-indigo-500 text-white p-3 rounded-2xl shadow-md active:scale-95 transition-all"><Icon name="send" size={18} /></button>
-                                </div>
-                            </div>
-                        )}
-
                         {/* EDIT / BACKFILL RECORD MODAL */}
                         {editingRecord && (
                             <div className="absolute inset-0 bg-white z-[150] flex flex-col p-6 animate-in slide-in-from-bottom duration-300">
                                 <div className="flex justify-between items-center mb-6">
-                                    <h3 className="font-bold flex items-center gap-2"><Icon name="edit" size={18} /> {editingRecord.isNew ? '補寫手帳' : '修改紀錄'}</h3>
+                                    <h3 className="font-bold flex items-center gap-2"><Icon name="edit" size={18} /> {editingRecord.isNew ? '補寫心情手帳' : '修改日記紀錄'}</h3>
                                     <button onClick={() => { setEditingRecord(null); setSelectedStickers([]); }} className="p-2 hover:bg-slate-100 rounded-full active:scale-90 transition-all text-slate-400"><Icon name="x" size={20}/></button>
                                 </div>
                                 <div className="flex items-center gap-4 mb-4 bg-slate-50 p-6 rounded-[2rem] border border-slate-100 shadow-inner">
@@ -982,12 +1091,11 @@
                                     </div>
                                 </div>
 
-                                {/* 編輯紀錄時的貼圖管理 */}
                                 <div className="mb-4">
                                     <div className="flex justify-between items-center mb-2">
-                                        <span className="text-xs font-bold text-slate-400">手帳貼圖裝飾</span>
+                                        <span className="text-xs font-bold text-slate-400">手帳貼紙點綴</span>
                                         <button onClick={() => setShowStickerPicker(true)} className="flex items-center gap-1 text-xs text-pink-500 bg-pink-50 px-2 py-1 rounded-full font-bold">
-                                            <Icon name="smile" size={12} /> 新增貼紙
+                                            <Icon name="smile" size={12} /> 加上貼圖
                                         </button>
                                     </div>
                                     {selectedStickers.length > 0 && (
@@ -1022,7 +1130,7 @@
                         {showStickerPicker && (
                             <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-[2.5rem] shadow-2xl border-t border-pink-100 p-6 z-[200] animate-in slide-in-from-bottom duration-300 max-h-[360px] flex flex-col">
                                 <div className="flex justify-between items-center mb-4">
-                                    <h4 className="font-bold text-pink-600 flex items-center gap-2">🧸 選擇貼圖</h4>
+                                    <h4 className="font-bold text-pink-600 flex items-center gap-2">🧸 選擇貼圖貼紙</h4>
                                     <button onClick={() => setShowStickerPicker(false)} className="p-2 hover:bg-slate-100 rounded-full">
                                         <Icon name="x" size={18} className="text-slate-400" />
                                     </button>
@@ -1030,10 +1138,10 @@
 
                                 <div className="flex border-b border-pink-50 mb-4 text-xs font-bold">
                                     <button onClick={() => setActiveStickerTab('builtin')} className={`flex-1 pb-3 text-center transition-all ${activeStickerTab === 'builtin' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>
-                                        內建暖心貼圖
+                                        官方暖心繪圖
                                     </button>
                                     <button onClick={() => setActiveStickerTab('custom')} className={`flex-1 pb-3 text-center transition-all ${activeStickerTab === 'custom' ? 'border-b-2 border-pink-500 text-pink-500' : 'text-slate-400'}`}>
-                                        自訂貼圖 ({customStickers.length})
+                                        超音波/自訂相片貼圖 ({customStickers.length})
                                     </button>
                                 </div>
 
@@ -1050,7 +1158,7 @@
 
                                     {activeStickerTab === 'custom' && (
                                         <div className="grid grid-cols-4 gap-4 justify-items-center items-center">
-                                            <button onClick={() => fileInputRef.current.click()} className="w-16 h-16 rounded-2xl border-2 border-dashed border-pink-200 hover:border-pink-400 text-pink-400 flex items-center justify-center transition-colors active:scale-95" title="上傳照片做成貼圖">
+                                            <button onClick={() => fileInputRef.current.click()} className="w-16 h-16 rounded-2xl border-2 border-dashed border-pink-200 hover:border-pink-400 text-pink-400 flex items-center justify-center transition-colors active:scale-95" title="上傳照片製作手帳貼圖">
                                                 <Icon name="plus" size={28} />
                                             </button>
                                             <input type="file" ref={fileInputRef} onChange={handleCustomStickerUpload} accept="image/*" className="hidden" />
@@ -1069,7 +1177,7 @@
                                                             setStickerToDelete(stk); 
                                                         }} 
                                                         className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full shadow-md transition-all active:scale-75 z-[210] w-5 h-5 flex items-center justify-center"
-                                                        title="自本機刪除貼圖"
+                                                        title="自本地刪除"
                                                     >
                                                         <Icon name="x" size={10} />
                                                     </button>
@@ -1082,7 +1190,7 @@
                         )}
                     </main>
                     
-                    <footer className="mt-4 text-[9px] text-slate-300 font-bold uppercase tracking-[0.2em] px-4 text-center">© 2024 MOMMY'S MOOD HARBOR ・ 給媽咪最溫柔的記憶足跡</footer>
+                    <footer className="mt-4 text-[9px] text-slate-300 font-bold uppercase tracking-[0.2em] px-4 text-center">© 2026 MOMMY'S MOOD HARBOR ・ 給媽咪最溫柔的心靈手帳軌跡</footer>
                 </div>
             );
         };
